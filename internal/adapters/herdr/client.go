@@ -37,7 +37,7 @@ type Client struct {
 // metadata write ("plugin:<plugin id>").
 func NewClient(path, source string) *Client {
 	return &Client{
-		api:    herdrapi.New(path),
+		api:    herdrapi.New(endpoint(path)),
 		path:   path,
 		source: source,
 		slots:  make(chan struct{}, maxInFlight),
