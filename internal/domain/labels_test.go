@@ -87,18 +87,31 @@ func TestSortTransitions(t *testing.T) {
 
 	assert.Equal(t, SortActive, SortOff.Apply(SortCycle))
 	assert.Equal(t, SortRecent, SortActive.Apply(SortCycle))
+	assert.Equal(t, SortRecent, SortTriage.Apply(SortCycle))
 	assert.Equal(t, SortOff, SortRecent.Apply(SortCycle))
 
 	assert.Equal(t, SortOff, SortRecent.Apply(SortNative))
+	assert.Equal(t, SortOff, SortTriage.Apply(SortNative))
 	assert.Equal(t, SortActive, SortOff.Apply(SortNative), "coming back in always lands on active")
+
+	assert.Equal(t, SortTriage, SortActive.Apply(SortTriageToggle))
+	assert.Equal(t, SortTriage, SortRecent.Apply(SortTriageToggle))
+	assert.Equal(t, SortTriage, SortHere.Apply(SortTriageToggle))
+	assert.Equal(t, SortTriage, SortOff.Apply(SortTriageToggle))
+	assert.Equal(t, SortActive, SortTriage.Apply(SortTriageToggle))
+	assert.Equal(t, SortActive, SortTriage.Apply(SortFlip))
 
 	mode, ok := ParseSortMode("grouped")
 	assert.True(t, ok)
 	assert.Equal(t, SortActive, mode)
+	mode, ok = ParseSortMode("triage")
+	assert.True(t, ok)
+	assert.Equal(t, SortTriage, mode)
 	_, ok = ParseSortMode("priority")
 	assert.False(t, ok)
 
 	assert.True(t, SortActive.Grouped(false))
+	assert.True(t, SortTriage.Grouped(false))
 	assert.False(t, SortRecent.Grouped(true))
 	assert.True(t, SortOff.Grouped(true))
 	assert.False(t, SortOff.Grouped(false))

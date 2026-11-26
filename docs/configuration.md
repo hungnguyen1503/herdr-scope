@@ -8,7 +8,7 @@ daemon applies it at once. Hand edits are picked up within two seconds.
 | Option | Default | Does |
 | --- | --- | --- |
 | `agents_panel` | `plugin` | Scope's Agents panel, or `herdr` for Herdr's own |
-| `order` | `active` | `active` grouped by activity, `recent` flat, `here` only the focused workspace and its family, `off` Herdr's order |
+| `order` | `active` | `active` grouped by activity, `recent` flat, `here` only the focused workspace and its family, `triage` needs-you first, `off` Herdr's order |
 | `layout` | `classic` | `classic`: the logo in a cell of its own colour (`§ · ✓ title`); `compact`: one cell per line (`§ ✓ title`) |
 | `variant` | `auto` | `font`, `text` (plain Unicode) or `none`; `auto` uses the font only where the terminal can draw it |
 | `space_mark` | `logo` | `logo`: a workspace's mark in Spaces is the logo of the agent its state speaks for; `state`: the state mark, plus a line naming its agents in `classic` |
@@ -92,7 +92,7 @@ command = "kriuchkov.herdr-scope.settings"
 description = "herdr-scope settings"
 ```
 
-Other actions (`view-toggle`, `view-native`, `state-start`, …) bind the same way; `herdr plugin
+Other actions (`view-triage`, `view-toggle`, `view-native`, `state-start`, …) bind the same way; `herdr plugin
 action list` names them all.
 
 ## Idle tiers

@@ -479,3 +479,117 @@ func TestWaitingCounts(t *testing.T) {
 	assert.Equal(t, 1, asking)
 	assert.Equal(t, 2, finished)
 }
+
+func TestTriageOrderRanksByNeedsYouAndLongestWait(t *testing.T) {
+	sinceMin := func(minutesAgo int) time.Time {
+		if minutesAgo < 0 {
+			return time.Time{}
+		}
+		return at(0).Add(-time.Duration(minutesAgo) * time.Minute)
+	}
+	s := (&scenario{}).
+		ws("w-unknown", "unknown", nil).
+		ws("w-stale", "stale", nil).
+		ws("w-idle", "idle", nil).
+		ws("w-fresh", "fresh", nil).
+		ws("w-work", "work", nil).
+		ws("w-done-new", "done-new", nil).
+		ws("w-done-old", "done-old", nil).
+		ws("w-blocked-zero", "blocked-zero", nil).
+		ws("w-blocked-new", "blocked-new", nil).
+		ws("w-blocked-old", "blocked-old", nil)
+	add := func(ws WorkspaceID, activityAgo int, sinceAgo int, display DisplayState) {
+		s.agent(ws, "t1", "p1", activityAgo, display)
+		s.agents[len(s.agents)-1].Since = sinceMin(sinceAgo)
+	}
+	// Activity stamps deliberately invert urgency to verify triage ignores raw activity.
+	add("w-unknown", 1, 1, DisplayUnknown)
+	add("w-stale", 2, 300, DisplayIdleStale)
+	add("w-idle", 3, 45, DisplayIdle)
+	add("w-fresh", 4, 5, DisplayIdleFresh)
+	add("w-work", 5, 10, DisplayWorking)
+	add("w-done-new", 6, 3, DisplayDone)
+	add("w-done-old", 20, 15, DisplayDone)
+	add("w-blocked-zero", 1, -1, DisplayBlocked)
+	add("w-blocked-new", 2, 4, DisplayBlocked)
+	add("w-blocked-old", 50, 12, DisplayBlocked)
+
+	v := s.build(SortTriage, DefaultDisplayPolicy())
+	require.True(t, v.Grouped)
+	assert.Equal(t, []string{
+		"# blocked-old", "0 w-blocked-old:p1",
+		"# blocked-new", "0 w-blocked-new:p1",
+		"# blocked-zero", "0 w-blocked-zero:p1",
+		"# done-old", "0 w-done-old:p1",
+		"# done-new", "0 w-done-new:p1",
+		"# work", "0 w-work:p1",
+		"# fresh", "0 w-fresh:p1",
+		"# idle", "0 w-idle:p1",
+		"# stale (stale)", "0 w-stale:p1",
+		"# unknown", "0 w-unknown:p1",
+	}, outline(v))
+
+	// Verify descending lexicographic sort of published keys mirrors BuildSidebar order.
+	for i := 1; i < len(v.Groups); i++ {
+		prev := v.Groups[i-1].Rows[0].Keys
+		curr := v.Groups[i].Rows[0].Keys
+		assert.Greater(t, prev.Workspace, curr.Workspace)
+		assert.Greater(t, prev.Pane, curr.Pane)
+	}
+}
+
+func TestTriageOrderKeepsActiveGroupingWorktreesSplitsAndFolds(t *testing.T) {
+	// Blocked worktree pulls its stale parent up; parent is drawn first, no gap inside.
+	s := (&scenario{}).
+		ws("app", "app", repo("app", false, "/src/app")).
+		ws("other", "other", nil).
+		ws("feature", "feature/auth", repo("app", true, "/wt/feature")).
+		ws("hotfix", "hotfix", repo("app", true, "/wt/hotfix")).
+		agent("app", "t1", "p1", 300, DisplayIdleStale).
+		agent("other", "t1", "p1", 1, DisplayWorking).
+		agent("feature", "t1", "p1", 50, DisplayBlocked).
+		agent("hotfix", "t1", "p1", 20, DisplayIdle)
+	for i := range s.agents {
+		s.agents[i].Since = s.agents[i].Activity.At
+	}
+
+	v := s.build(SortTriage, spaced())
+	assert.Equal(t, []string{
+		"# app (stale)", "0 app:p1",
+		"# ├ feature/auth", "1 feature:p1",
+		"# └ hotfix", "1 hotfix:p1", "",
+		"# other", "0 other:p1", "",
+	}, outline(v))
+
+	tree := ResolveWorktrees(s.workspaces)
+	assert.Equal(t, []WorkspaceID{"app", "hotfix", "feature", "other"},
+		WorkspaceOrder([]WorkspaceID{"other", "app", "hotfix", "feature"}, v, tree))
+
+	// Split corners keep the split-from pane first even when a split child is blocked.
+	splits := (&scenario{}).ws("w1", "proj", nil).
+		agent("w1", "t1", "p1", 10, DisplayIdle).
+		agent("w1", "t1", "p2", 20, DisplayBlocked).
+		agent("w1", "t1", "p3", 5, DisplayDone).
+		agent("w1", "t2", "p4", 1, DisplayWorking)
+	for i := range splits.agents {
+		splits.agents[i].Since = splits.agents[i].Activity.At
+	}
+	p := DefaultDisplayPolicy()
+	p.SplitCorner = true
+	sv := splits.build(SortTriage, p)
+	assert.Equal(t, []string{"# proj", "0 w1:p1", "1├─ w1:p2", "1└─ w1:p3", "1 w1:p4", ""}, outline(sv))
+	for i := 1; i < len(sv.Groups[0].Rows); i++ {
+		prev := sv.Groups[0].Rows[i-1].Keys
+		curr := sv.Groups[0].Rows[i].Keys
+		assert.GreaterOrEqual(t, prev.Workspace, curr.Workspace)
+		assert.Greater(t, prev.Tab, curr.Tab)
+	}
+
+	// Fold line borrows the family's first row and sorts strictly before it.
+	fv := folderScenario().folded(SortTriage, "acme", "acme")
+	line, root := fv.Groups[0].Rows[0], fv.Groups[1].Rows[0]
+	require.NotNil(t, line.Fold)
+	assert.Equal(t, root.Keys.Workspace, line.Keys.Workspace)
+	assert.Equal(t, root.Keys.Tab, line.Keys.Tab)
+	assert.Greater(t, line.Keys.Pane, root.Keys.Pane)
+}

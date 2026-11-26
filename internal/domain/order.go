@@ -23,7 +23,10 @@ type SortKeys struct {
 	Tab string
 }
 
-const noStamp = "000000000000"
+const (
+	noStamp         = "000000000000"
+	maxMinute int64 = 999999999999
+)
 
 // minuteKey is an activity stamp at minute grain, zero-padded so that string
 // order is numeric order: a working pane changes its key once a minute.
@@ -38,6 +41,43 @@ func minuteKey(activity Activity) string {
 	return key
 }
 
+// triageKey encodes who needs the engineer first (rank descending) and, within
+// a rank, longest wait first by inverting the minute stamp against maxMinute
+// (earliest Since -> largest string); unknown waits sort last in the rank.
+func triageKey(display DisplayState, since time.Time) string {
+	wait := noStamp
+	if !since.IsZero() {
+		m := since.UnixMilli() / int64(time.Minute/time.Millisecond)
+		m = min(maxMinute, max(0, m))
+		key := strconv.FormatInt(maxMinute-m, 10)
+		if len(key) < len(noStamp) {
+			key = noStamp[len(key):] + key
+		}
+		wait = key
+	}
+	return triageRank(display) + "-" + wait
+}
+
+func triageRank(display DisplayState) string {
+	switch display {
+	case DisplayBlocked:
+		return "7"
+	case DisplayDone:
+		return "6"
+	case DisplayWorking:
+		return "5"
+	case DisplayIdleFresh:
+		return "4"
+	case DisplayIdle:
+		return "3"
+	case DisplayIdleStale:
+		return "2"
+	case DisplayUnknown:
+		return "1"
+	}
+	return "1"
+}
+
 // orNone is a minute key, or noStamp for a pane without activity.
 func orNone(key string) string {
 	if key == "" {
@@ -50,6 +90,8 @@ func orNone(key string) string {
 type orderEntry struct {
 	agent    Agent
 	activity Activity
+	display  DisplayState
+	since    time.Time
 }
 
 // ranking is everything ordering knows about one snapshot.
@@ -98,20 +140,24 @@ func (r ranking) family(ws WorkspaceID) WorkspaceID {
 // contiguous, parent first. When the parent runs no agent the members still
 // stay together, under a synthesised parent row (orphanRepo: the folder's
 // name, or the repository's).
-func rank(entries []orderEntry, tree WorktreeTree) ranking {
+func rank(entries []orderEntry, tree WorktreeTree, mode SortMode) ranking {
 	r := ranking{
 		pane: make(map[PaneID]string, len(entries)), workspace: map[WorkspaceID]string{},
 		tab: make(map[PaneID]string, len(entries)), parentOf: map[WorkspaceID]WorkspaceID{},
 		orphanOf: map[WorkspaceID]WorkspaceID{}, orphanRepo: map[WorkspaceID]string{}, detached: map[WorkspaceID]bool{},
 		splitChild: make(map[PaneID]bool, len(entries)),
 	}
-	minutes := make([]string, len(entries))
+	keys := make([]string, len(entries))
 	own := map[WorkspaceID]string{}
 	present := map[WorkspaceID]bool{}
 	var wsOrder []WorkspaceID
 	for i, e := range entries {
-		minutes[i] = minuteKey(e.activity)
-		r.pane[e.agent.Pane] = minutes[i]
+		key := minuteKey(e.activity)
+		if mode == SortTriage {
+			key = triageKey(e.display, e.since)
+		}
+		keys[i] = key
+		r.pane[e.agent.Pane] = key
 		ws := e.agent.Workspace
 		if ws == "" {
 			continue
@@ -120,8 +166,8 @@ func rank(entries []orderEntry, tree WorktreeTree) ranking {
 			present[ws] = true
 			wsOrder = append(wsOrder, ws)
 		}
-		if key := orNone(minutes[i]); key > own[ws] {
-			own[ws] = key
+		if k := orNone(key); k > own[ws] {
+			own[ws] = k
 		}
 	}
 	for child, parent := range tree.Parents {
@@ -154,15 +200,15 @@ func rank(entries []orderEntry, tree WorktreeTree) ranking {
 		}
 		r.workspace[ws] = familyKey[f] + "-" + string(f) + "-" + depth + "-" + own[ws] + "-" + string(ws)
 	}
-	rankTabs(entries, minutes, &r)
+	rankTabs(entries, keys, &r)
 	return r
 }
 
 // rankTabs ranks the panes sharing a tab — one split screen — as a unit, by
 // their most recent member; inside it the pane the others were split from
 // (Herdr lists panes in layout order, so the first seen) comes first.
-// minutes are the entries' minute keys.
-func rankTabs(entries []orderEntry, minutes []string, r *ranking) {
+// keys are the entries' pane sort keys.
+func rankTabs(entries []orderEntry, keys []string, r *ranking) {
 	panes := map[TabID][]PaneID{}
 	best := map[TabID]string{}
 	for i, e := range entries {
@@ -171,7 +217,7 @@ func rankTabs(entries []orderEntry, minutes []string, r *ranking) {
 			continue
 		}
 		panes[tab] = append(panes[tab], e.agent.Pane)
-		if key := orNone(minutes[i]); key > best[tab] {
+		if key := orNone(keys[i]); key > best[tab] {
 			best[tab] = key
 		}
 	}
@@ -184,7 +230,7 @@ func rankTabs(entries []orderEntry, minutes []string, r *ranking) {
 		if panes[tab][0] == e.agent.Pane {
 			head = "1"
 		}
-		r.tab[e.agent.Pane] = best[tab] + "-" + string(tab) + "-" + head + "-" + orNone(minutes[i])
+		r.tab[e.agent.Pane] = best[tab] + "-" + string(tab) + "-" + head + "-" + orNone(keys[i])
 		r.splitChild[e.agent.Pane] = len(panes[tab]) > 1 && panes[tab][0] != e.agent.Pane
 	}
 }
@@ -195,7 +241,7 @@ func rankTabs(entries []orderEntry, minutes []string, r *ranking) {
 func displayOrder(entries []orderEntry, mode SortMode, r ranking) []orderEntry {
 	out := append([]orderEntry(nil), entries...)
 	switch mode {
-	case SortActive, SortHere:
+	case SortActive, SortHere, SortTriage:
 		sort.SliceStable(out, func(i, j int) bool { return compareActive(out[i], out[j], r) < 0 })
 	case SortRecent:
 		sort.SliceStable(out, func(i, j int) bool {

@@ -168,7 +168,7 @@ func BuildSidebar(in SidebarInput) SidebarView {
 	displays := make(map[PaneID]DisplayState, len(in.Agents))
 	since := make(map[PaneID]time.Time, len(in.Agents))
 	for i, a := range in.Agents {
-		entries[i] = orderEntry{agent: a.Agent, activity: a.Activity}
+		entries[i] = orderEntry{agent: a.Agent, activity: a.Activity, display: a.Display, since: a.Since}
 		displays[a.Agent.Pane] = a.Display
 		since[a.Agent.Pane] = a.Since
 	}
@@ -179,7 +179,7 @@ func BuildSidebar(in SidebarInput) SidebarView {
 	} else {
 		tree = ResolveTree(in.Workspaces, in.Policy.NestFolders, in.Home)
 	}
-	ranks := rank(entries, tree)
+	ranks := rank(entries, tree, in.Mode)
 	grouped := in.Mode.Grouped(in.HostGrouped)
 	ordered := displayOrder(entries, in.Mode, ranks)
 	ranks = detachStrays(ordered, ranks)

@@ -36,7 +36,7 @@ func FoldKey(ws Workspace) string {
 
 // Folds reports whether folded families leave the Agents panel in this
 // order: only Scope's grouped orders install the filter that hides them.
-func (m SortMode) Folds() bool { return m == SortActive || m == SortHere }
+func (m SortMode) Folds() bool { return m == SortActive || m == SortHere || m == SortTriage }
 
 // FollowVisits is the folded roots open for a visit (SidebarInput.Opened)
 // once the focus is where agents and focused say. A click on a fold line

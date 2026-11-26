@@ -125,8 +125,10 @@ func TestFoldsLeaveOnlyScopesGroupedOrders(t *testing.T) {
 			}
 		}
 	}
-	v := folderScenario().folded(SortHere, "notes", "acme")
-	assert.Len(t, v.Folded, 1, "here is active narrowed")
+	for _, mode := range []SortMode{SortHere, SortTriage} {
+		v := folderScenario().folded(mode, "notes", "acme")
+		assert.Len(t, v.Folded, 1, "%s is grouped like active", mode)
+	}
 }
 
 func TestFoldedRowsKeepTheirActivityOrder(t *testing.T) {

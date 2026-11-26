@@ -525,7 +525,7 @@ func TestFoldFamilyNamesTheFocusedWorkspace(t *testing.T) {
 	control.reply = ports.ControlReply{OK: true, Family: "acme", Mode: "recent"}
 	note, err = fold.Execute(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, "fold: acme unfolded (the Agents panel folds in the active and here orders)", note)
+	assert.Equal(t, "fold: acme unfolded (the Agents panel folds in the active, triage and here orders)", note)
 
 	_, err = FoldFamily{Control: &fakeControl{err: errors.New("refused")}}.Execute(context.Background())
 	require.ErrorIs(t, err, ErrNotRunning)

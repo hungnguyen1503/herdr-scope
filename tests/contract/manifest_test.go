@@ -61,7 +61,7 @@ func TestManifestActionsAreHerdrConventionsAndSpecComplete(t *testing.T) {
 		assert.False(t, ids[a.ID], "duplicate action id %s (Herdr refuses one even across platforms)", a.ID)
 		ids[a.ID] = true
 	}
-	for _, want := range []string{"state-start", "state-stop", "view-flip", "jump", "settings", "configure", "unconfigure", "uninstall-font", "install-font"} {
+	for _, want := range []string{"state-start", "state-stop", "view-flip", "view-triage", "jump", "settings", "configure", "unconfigure", "uninstall-font", "install-font"} {
 		assert.True(t, ids[want], "missing action %s", want)
 	}
 	require.Len(t, m.Panes, 1)

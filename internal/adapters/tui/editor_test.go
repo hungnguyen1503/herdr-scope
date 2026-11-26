@@ -351,7 +351,9 @@ func TestOrderOffersHere(t *testing.T) {
 	assert.True(t, b.requests[0].OrderChanged)
 
 	press(t, e, "l")
-	assert.Equal(t, "off", value(t, e, config.FieldOrder), "here steps on like any other order")
+	assert.Equal(t, "triage", value(t, e, config.FieldOrder), "here steps on like any other order")
+	press(t, e, "l")
+	assert.Equal(t, "off", value(t, e, config.FieldOrder))
 }
 
 func TestQuitAsksOnceWhenDirty(t *testing.T) {
@@ -531,8 +533,8 @@ func TestRenderHelpKeepsTwoWrappedRows(t *testing.T) {
 		assert.True(t, strings.HasPrefix(line, " "+sgrDim))
 		assert.LessOrEqual(t, width(line), 60, "help lines fit the popup")
 	}
-	assert.Contains(t, lines[hint-3], "Agents panel order: active (grouped, busiest first, stale")
-	assert.Contains(t, lines[hint-2], "last), recent (flat, by activity), here (active, only the")
+	assert.Contains(t, lines[hint-3], "Agents panel order: active (grouped, busiest first), recent")
+	assert.Contains(t, lines[hint-2], "(flat, by activity), here (focused family), triage")
 
 	goTo(t, e, "group_gap")
 	lines = strings.Split(e.Render(60, 40), "\n")

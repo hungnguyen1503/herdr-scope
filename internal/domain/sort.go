@@ -3,8 +3,9 @@ package domain
 // SortMode is the Agents panel order.
 type SortMode string
 
-// Sort modes. Both of Scope's orders rank by activity and nothing else: a
-// question left hanging on purpose sinks with time like everything else.
+// Sort modes. active, recent and here rank by activity; triage ranks by who
+// needs the engineer (question, unseen result, working, idle tiers), longest
+// wait first.
 const (
 	// SortActive keeps the workspace groups and ranks by activity at both
 	// levels: the busiest project first, stale rows last.
@@ -16,6 +17,10 @@ const (
 	// SortHere is the active order narrowed to the focused workspace and its
 	// family: the folders nested in it, its worktrees.
 	SortHere SortMode = "here"
+	// SortTriage keeps the active order's grouping and nesting, and ranks
+	// rows by who needs the engineer (blocked question, unseen result,
+	// working, idle tiers), longest wait first inside each rank.
+	SortTriage SortMode = "triage"
 )
 
 // DefaultSortMode is the order nobody has chosen yet. Sorting by activity is
@@ -33,6 +38,8 @@ func ParseSortMode(raw string) (SortMode, bool) {
 		return SortOff, true
 	case string(SortHere):
 		return SortHere, true
+	case string(SortTriage):
+		return SortTriage, true
 	default:
 		return "", false
 	}
@@ -54,6 +61,8 @@ const (
 	// SortHereToggle narrows the panel to the focused workspace and back to
 	// active.
 	SortHereToggle SortOp = "here"
+	// SortTriageToggle switches to triage and back to active.
+	SortTriageToggle SortOp = "triage"
 )
 
 // Apply returns the mode a transition lands on.
@@ -68,7 +77,7 @@ func (m SortMode) Apply(op SortOp) SortMode {
 		switch m {
 		case SortOff:
 			return SortActive
-		case SortActive, SortHere:
+		case SortActive, SortHere, SortTriage:
 			return SortRecent
 		case SortRecent:
 			return SortOff
@@ -84,16 +93,21 @@ func (m SortMode) Apply(op SortOp) SortMode {
 			return SortActive
 		}
 		return SortHere
+	case SortTriageToggle:
+		if m == SortTriage {
+			return SortActive
+		}
+		return SortTriage
 	}
 	return m
 }
 
-// Grouped reports whether rows sit under workspace headers. Scope's active
-// order groups; recent never does; off groups only when Herdr's own panel is
+// Grouped reports whether rows sit under workspace headers. Scope's grouped
+// orders group; recent never does; off groups only when Herdr's own panel is
 // in its grouped ("spaces") order.
 func (m SortMode) Grouped(hostGrouped bool) bool {
 	switch m {
-	case SortActive, SortHere:
+	case SortActive, SortHere, SortTriage:
 		return true
 	case SortRecent:
 		return false

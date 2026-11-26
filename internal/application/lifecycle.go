@@ -404,7 +404,7 @@ func (u FoldFamily) Execute(ctx context.Context) (string, error) {
 		note = "fold: " + reply.Family + " folded"
 	}
 	if mode, ok := domain.ParseSortMode(reply.Mode); ok && !mode.Folds() {
-		note += " (the Agents panel folds in the active and here orders)"
+		note += " (the Agents panel folds in the active, triage and here orders)"
 	}
 	return note, nil
 }

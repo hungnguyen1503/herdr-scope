@@ -177,10 +177,9 @@ func Fields() []Field {
 		{
 			Key:     FieldOrder,
 			Kind:    KindEnum,
-			Options: []string{"active", "recent", "here", "off"},
+			Options: []string{"active", "recent", "here", "triage", "off"},
 			Virtual: true,
-			Help: "Agents panel order: active (grouped, busiest first, stale last), recent (flat, by activity), here " +
-				"(active, only the focused workspace and its family) or off (Herdr's own order). Applies while agents_panel is plugin.",
+			Help:    "Agents panel order: active (grouped, busiest first), recent (flat, by activity), here (focused family), triage (needs-you first) or off (Herdr's order).",
 		},
 		boolField(
 			"reorder_workspaces",

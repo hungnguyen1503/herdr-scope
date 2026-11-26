@@ -312,9 +312,11 @@ func TestWriterOrders(t *testing.T) {
 	host := newFakeHost()
 	w := NewWriter(host, textPresentation(), (&clock{now: at0()}).Now)
 	require.NoError(t, w.SetOrder(context.Background(), domain.SortActive, nil))
+	require.NoError(t, w.SetOrder(context.Background(), domain.SortTriage, nil))
 	require.NoError(t, w.SetOrder(context.Background(), domain.SortRecent, nil))
 	require.NoError(t, w.SetOrder(context.Background(), domain.SortOff, nil))
-	assert.Equal(t, []string{"active:ws_key", "recent:sort_key"}, host.views)
+	assert.Equal(t, []string{"active:ws_key", "triage:ws_key", "recent:sort_key"}, host.views)
+	assert.Equal(t, []agentView{{hide: "folded"}, {hide: "folded"}, {}}, host.scopes)
 	assert.Equal(t, 1, host.cleared)
 }
 

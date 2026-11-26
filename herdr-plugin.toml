@@ -104,6 +104,12 @@ description = "Narrow the Agents panel to the focused workspace and the folders 
 command = ["bin/herdr-scope", "view", "--here"]
 
 [[actions]]
+id = "view-triage"
+title = "Agents: triage <-> active"
+description = "Rank grouped workspaces and rows by who needs you first (question, unseen result, working, idle), longest wait first; again for active."
+command = ["bin/herdr-scope", "view", "--triage"]
+
+[[actions]]
 id = "fold"
 title = "Agents: fold <-> unfold this folder"
 description = "Fold the focused workspace's folder (its nested folders and worktrees) in the Agents panel to one line, or unfold it. Agents waiting on you and the focused workspace stay."

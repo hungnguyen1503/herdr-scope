@@ -328,7 +328,8 @@ func (w *Writer) sweep(ctx context.Context, live map[domain.PaneID]domain.AgentI
 }
 
 // SetOrder installs the panel order: active sorts by workspace, then split,
-// then pane; recent by pane alone; here is active kept to the focused
+// then pane; triage keeps active's grouping and ranks by who needs the
+// engineer first; recent by pane alone; here is active kept to the focused
 // workspace and its family; off hands the panel back to Herdr. The grouped
 // orders leave out the rows a fold hides.
 func (w *Writer) SetOrder(ctx context.Context, mode domain.SortMode, family []domain.WorkspaceID) error {
@@ -336,6 +337,8 @@ func (w *Writer) SetOrder(ctx context.Context, mode domain.SortMode, family []do
 	switch mode {
 	case domain.SortActive:
 		return w.host.SetAgentView(ctx, "active", active, tokenFolded, false, nil)
+	case domain.SortTriage:
+		return w.host.SetAgentView(ctx, "triage", active, tokenFolded, false, nil)
 	case domain.SortHere:
 		return w.host.SetAgentView(ctx, "here", active, tokenFolded, true, family)
 	case domain.SortRecent:
