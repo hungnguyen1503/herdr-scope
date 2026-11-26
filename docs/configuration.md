@@ -30,7 +30,7 @@ daemon applies it at once. Hand edits are picked up within two seconds.
 | `trim_group_prefix` | `true` | drop the workspace name from a title the header already shows |
 | `worktree_mark` | `U+F418` | the mark on a worktree header (needs a Nerd Font); empty for none |
 | `follow_appearance` | `false` | switch Herdr's theme with the desktop's light/dark; needs a `[theme]` table |
-| `run_root` | `""` | directory of Bunny run-ledger JSON files to join with live panes; empty disables it |
+| `run_root` | `""` | directory of Bunny run-ledger JSON files to join with live panes; empty disables it; files whose mtime is older than 24 h are skipped without being opened |
 | `run_line` | `off` | `on` prepends run cells (`$run_state`, `$run_signal`, `$run_age`) to agent rows when `run_root` is set |
 | `colors.active_row_bg_light` | `#b9cdf2` | selected-row fill on a light theme; empty keeps the theme's |
 | `colors.active_row_bg_dark` | `#232636` | selected-row fill on a dark theme |

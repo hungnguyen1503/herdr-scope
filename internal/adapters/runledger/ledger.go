@@ -21,6 +21,12 @@ import (
 
 const cacheTTL = 30 * time.Second
 
+// defaultRetention is the mtime window List applies by default: a .json last
+// written longer ago cannot describe a live pane, so it is skipped from the
+// directory listing without being opened (reading all 3432 files of a busy
+// ledger cost the daemon a 21 s stall).
+const defaultRetention = 24 * time.Hour
+
 // Ledger reads and caches Bunny wave run files in a flat directory.
 type Ledger struct {
 	mu     sync.Mutex
@@ -28,21 +34,26 @@ type Ledger struct {
 	logger ports.Logger
 	clock  func() time.Time
 
+	// retention is the mtime window; zero or negative disables it and every
+	// .json is read, the pre-window behaviour.
+	retention time.Duration
+
 	loaded   bool
 	dirMtime time.Time
 	lastRead time.Time
 	records  []ports.RunRecord
 }
 
-// New builds a RunLedger reading <root>/*.json.
+// New builds a RunLedger reading <root>/*.json, newest-of-window first.
 func New(root string, logger ports.Logger, clock func() time.Time) *Ledger {
 	if clock == nil {
 		clock = time.Now
 	}
 	return &Ledger{
-		root:   root,
-		logger: logger,
-		clock:  clock,
+		root:      root,
+		logger:    logger,
+		clock:     clock,
+		retention: defaultRetention,
 	}
 }
 
@@ -54,6 +65,22 @@ func (l *Ledger) SetRoot(root string) {
 		return
 	}
 	l.root = root
+	l.loaded = false
+	l.dirMtime = time.Time{}
+	l.lastRead = time.Time{}
+	l.records = nil
+}
+
+// SetRetention changes the mtime window and invalidates the cached read:
+// records kept under another window would drop files that just came back
+// into scope. Tests drive it with a fake clock; zero disables the window.
+func (l *Ledger) SetRetention(d time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.retention == d {
+		return
+	}
+	l.retention = d
 	l.loaded = false
 	l.dirMtime = time.Time{}
 	l.lastRead = time.Time{}
@@ -85,8 +112,9 @@ type waveFile struct {
 	} `json:"workers"`
 }
 
-// List returns run records from <root>/*.json, newest wave first. Directory
-// reads are cached by mtime and throttled to at most once every 30 seconds.
+// List returns run records from <root>/*.json, newest wave first, reading only
+// files whose mtime is inside the retention window. Directory reads are cached
+// by mtime and throttled to at most once every 30 seconds.
 func (l *Ledger) List(ctx context.Context) ([]ports.RunRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("runledger list: %w", err)
@@ -125,6 +153,22 @@ func (l *Ledger) List(ctx context.Context) ([]ports.RunRecord, error) {
 			continue
 		}
 		path := filepath.Join(l.root, entry.Name())
+		// Stale files are dropped from the listing by mtime alone, before any
+		// open: state lives inside the JSON, so the listing cannot tell a
+		// closed run from a running one — a closed run whose file was touched
+		// within the window is therefore still read, and that is deliberate,
+		// because the freshest close is exactly what `runs` and a lingering
+		// pane still need to see.
+		if l.retention > 0 {
+			fi, infoErr := entry.Info()
+			if infoErr != nil {
+				l.debug("skip run file with unreadable metadata", "path", path, "error", infoErr)
+				continue
+			}
+			if now.Sub(fi.ModTime()) > l.retention {
+				continue
+			}
+		}
 		raw, readErr := os.ReadFile(path)
 		if readErr != nil {
 			l.debug("skip unreadable run file", "path", path, "error", readErr)

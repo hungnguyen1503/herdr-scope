@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -187,4 +188,71 @@ func TestMatchPrefersTerminalIDAndNewestWave(t *testing.T) {
 	require.Len(t, matched, 2)
 	assert.Equal(t, "run-term-newest", matched["w1:p1"].RunID, "terminal ID match beats pane ID match")
 	assert.Equal(t, "run-pane-only", matched["w1:p2"].RunID, "falls back to pane ID when terminal ID is absent")
+}
+
+func TestLedgerRetentionWindow(t *testing.T) {
+	const (
+		validBody   = `{"runId":"r-1","timestamp":"2026-11-26T09:00:00Z","workers":[{"workerName":"w","state":"running","paneId":"w1:p1"}]}`
+		closedBody  = `{"runId":"r-2","timestamp":"2026-11-26T09:00:00Z","workers":[{"workerName":"w","state":"running","closedAt":"2026-11-26T09:30:00Z","paneId":"w1:p2"}]}`
+		corruptBody = "{bad json"
+	)
+	now := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name        string
+		body        string
+		age         time.Duration // mtime = now - age; negative is a future mtime
+		wantRecords int
+		wantState   string
+		// wantOpened is proven through the corrupt body: "skip corrupt run
+		// file" can only be logged if ReadFile ran. A permission stub is not
+		// usable here because Windows turns 0o000 into read-only, not
+		// unreadable, so the debug log is the open-counter on every OS.
+		wantOpened bool
+	}{
+		{"stale valid file is skipped unopened", validBody, 25 * time.Hour, 0, "", false},
+		{"stale corrupt file is skipped unopened", corruptBody, 25 * time.Hour, 0, "", false},
+		{"fresh valid file is read", validBody, time.Hour, 1, "running", false},
+		{"fresh corrupt file is opened and logged", corruptBody, time.Hour, 0, "", true},
+		{"mtime exactly at the window edge is read", corruptBody, defaultRetention, 0, "", true},
+		{"future mtime is read", validBody, -time.Hour, 1, "running", false},
+		{"closed run with fresh mtime is still read", closedBody, time.Hour, 1, "closed", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			logger := &spyLogger{}
+			path := writeFixture(t, dir, "f.json", tc.body)
+			mtime := now.Add(-tc.age)
+			require.NoError(t, os.Chtimes(path, mtime, mtime))
+
+			ledger := New(dir, logger, func() time.Time { return now })
+			records, err := ledger.List(context.Background())
+			require.NoError(t, err)
+			assert.Len(t, records, tc.wantRecords)
+			if tc.wantState != "" {
+				assert.Equal(t, tc.wantState, records[0].State)
+			}
+			assert.Equal(t, tc.wantOpened, slices.Contains(logger.debugs, "skip corrupt run file"),
+				"the corrupt-file debug line proves whether the file was opened")
+		})
+	}
+}
+
+func TestLedgerSetRetentionDisablesAndInvalidates(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
+	path := writeFixture(t, dir, "old.json",
+		`{"runId":"r-old","timestamp":"2026-11-26T09:00:00Z","workers":[{"workerName":"w"}]}`)
+	mtime := now.Add(-25 * time.Hour)
+	require.NoError(t, os.Chtimes(path, mtime, mtime))
+
+	ledger := New(dir, &spyLogger{}, func() time.Time { return now })
+	records, err := ledger.List(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, records, "the default 24h window skips a 25h-old file")
+
+	ledger.SetRetention(0)
+	records, err = ledger.List(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, records, 1, "a disabled window reads every file and SetRetention drops the cache")
 }
