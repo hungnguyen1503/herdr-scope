@@ -137,7 +137,8 @@ type Presentation struct {
 	ShowAge ports.AgeMode
 	// RunLine prepends run-ledger cells to agent rows when run_root is set.
 	RunLine bool
-	// Logger logs a one-time warning when run_line exceeds Herdr's 16-token row limit.
+	// Logger logs once, at debug level, when run_line had to drop cells to fit
+	// Herdr's 16-token row limit.
 	Logger      ports.Logger
 	runLineOnce *sync.Once
 	// tables is shared by every copy and never written after NewPresentation.

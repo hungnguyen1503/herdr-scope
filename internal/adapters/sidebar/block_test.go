@@ -139,13 +139,14 @@ func TestNormalizeMatchesHerdr(t *testing.T) {
 }
 
 type blockSpyLogger struct {
-	warns []string
+	debugs []string
+	warns  []string
 }
 
-func (l *blockSpyLogger) Debug(string, ...any)      {}
-func (l *blockSpyLogger) Info(string, ...any)       {}
-func (l *blockSpyLogger) Warn(msg string, _ ...any) { l.warns = append(l.warns, msg) }
-func (l *blockSpyLogger) Error(string, ...any)      {}
+func (l *blockSpyLogger) Debug(msg string, _ ...any) { l.debugs = append(l.debugs, msg) }
+func (l *blockSpyLogger) Info(string, ...any)        {}
+func (l *blockSpyLogger) Warn(msg string, _ ...any)  { l.warns = append(l.warns, msg) }
+func (l *blockSpyLogger) Error(string, ...any)       {}
 
 func TestRunLinePrependsInCompactSkipsAndLogsOnceInClassicAndOffIsIdentical(t *testing.T) {
 	baseSettings := ports.DefaultSettings()
@@ -160,27 +161,95 @@ func TestRunLinePrependsInCompactSkipsAndLogsOnceInClassicAndOffIsIdentical(t *t
 	offWithRoot, err := NewLayout(NewPresentation(withRootOff, nil), ports.AppearanceDark, []domain.AgentKind{"claude"})
 	require.NoError(t, err)
 	assert.Equal(t, offWithoutRoot.TOML(), offWithRoot.TOML(), "run_line=off keeps TOML byte-identical even with run_root set")
+}
 
-	compactOn := withRootOff
-	compactOn.Presentation.RunLine = ports.RunLineOn
-	compactLayout, err := NewLayout(NewPresentation(compactOn, nil), ports.AppearanceDark, []domain.AgentKind{"claude"})
+// TestRunLineTakesAsManyCellsAsFitHighestValueFirst pins the adaptive prepend: cells go on highest value first
+// and stop at Herdr's ceiling, so a layout that cannot hold all three keeps
+// the two that matter instead of losing every one.
+func TestRunLineTakesAsManyCellsAsFitHighestValueFirst(t *testing.T) {
+	cases := []struct {
+		name   string
+		layout ports.Layout
+		// want is the run cells prepended, in order.
+		want []string
+		// lineLen is the cell count the layout already spends on furniture,
+		// titles and logos.
+		lineLen int
+	}{
+		// Seven title cells leave room for all three (3 + 7 = 10 ≤ 16).
+		{"compact takes all three", ports.LayoutCompact, []string{"$run_state", "$run_age", "$run_signal"}, 7},
+		// Fourteen furniture, logo and title cells leave room for two; the
+		// signal goes (2 + 14 = 16, a third would be 17).
+		{"classic takes two", ports.LayoutClassic, []string{"$run_state", "$run_age"}, 14},
+		// A line already at the ceiling keeps none and only logs.
+		{"a full line takes none", ports.LayoutClassic, nil, rowTokenLimit},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := ports.DefaultSettings()
+			settings.Presentation.Variant = ports.VariantText
+			settings.Presentation.Layout = ports.LayoutCompact
+			settings.RunRoot = "/tmp/runs"
+			settings.Presentation.RunLine = ports.RunLineOn
+			settings.Presentation.Layout = tc.layout
+			p := NewPresentation(settings, nil)
+			logger := &blockSpyLogger{}
+			p.Logger = logger
+
+			line := make([]Cell, tc.lineLen)
+			for i := range line {
+				line[i] = cell("$title_idle", "#ffffff", false)
+			}
+			got := runLineCells(line, colorsFor(ports.AppearanceDark), p)
+			require.Len(t, got, len(tc.want))
+			for i, want := range tc.want {
+				assert.Equal(t, want, got[i].Token)
+			}
+			assert.LessOrEqual(t, len(got)+len(line), rowTokenLimit)
+
+			dropped := 3 - len(tc.want)
+			if dropped == 0 {
+				assert.Empty(t, logger.debugs, "nothing dropped, nothing logged")
+				return
+			}
+			assert.Len(t, logger.debugs, 1, "the drop is logged once, at debug level")
+			assert.Empty(t, logger.warns, "a degraded row is not a warning")
+		})
+	}
+}
+
+// TestRunLineLayouts proves the real layouts get the predicted counts and that
+// the run cells keep their colours.
+func TestRunLineLayoutsKeepTheirColorsAndCounts(t *testing.T) {
+	settings := ports.DefaultSettings()
+	settings.Presentation.Variant = ports.VariantText
+	settings.RunRoot = "/tmp/runs"
+	settings.Presentation.RunLine = ports.RunLineOn
+
+	settings.Presentation.Layout = ports.LayoutCompact
+	compact, err := NewLayout(NewPresentation(settings, nil), ports.AppearanceDark, []domain.AgentKind{"claude"})
 	require.NoError(t, err)
-	assert.Contains(t, compactLayout.TOML(), RunLineTag)
-	assert.Len(t, compactLayout.Agents[2], 10)
-	assert.Equal(t, "$run_state", compactLayout.Agents[2][0].Token)
-	assert.Equal(t, "$run_signal", compactLayout.Agents[2][1].Token)
-	assert.Equal(t, "$run_age", compactLayout.Agents[2][2].Token)
-	assert.Equal(t, "$title_working", compactLayout.Agents[2][3].Token)
+	assert.Contains(t, compact.TOML(), RunLineTag)
+	assert.Len(t, compact.Agents[2], 10)
+	assert.Equal(t, "$run_state", compact.Agents[2][0].Token)
+	assert.Equal(t, "$run_age", compact.Agents[2][1].Token)
+	assert.Equal(t, "$run_signal", compact.Agents[2][2].Token)
+	assert.Equal(t, "$title_working", compact.Agents[2][3].Token)
+	c := colorsFor(ports.AppearanceDark)
+	assert.Equal(t, c.Subtle, compact.Agents[2][0].Fg, "run_state keeps its colour")
+	assert.Equal(t, c.IdleStale, compact.Agents[2][1].Fg, "run_age keeps its colour")
+	assert.Equal(t, c.Subtle, compact.Agents[2][2].Fg, "run_signal keeps its colour")
 
-	// Classic row already has 14 cells; prepending 3 run cells (17 > 16) keeps old row and warns once.
-	classicOn := compactOn
-	classicOn.Presentation.Layout = ports.LayoutClassic
-	p := NewPresentation(classicOn, nil)
+	settings.Presentation.Layout = ports.LayoutClassic
+	p := NewPresentation(settings, nil)
 	logger := &blockSpyLogger{}
 	p.Logger = logger
-	classicLayout, err := NewLayout(p, ports.AppearanceDark, []domain.AgentKind{"claude", "gemini"})
+	classic, err := NewLayout(p, ports.AppearanceDark, []domain.AgentKind{"claude", "gemini"})
 	require.NoError(t, err)
-	assert.Len(t, classicLayout.Agents[2], 14)
-	assert.Equal(t, "$split_mark", classicLayout.Agents[2][0].Token)
-	assert.Len(t, logger.warns, 1, "row-limit warning is logged at most once across agent rows")
+	assert.Len(t, classic.Agents[2], 16, "classic keeps its ten furniture cells and gains two run cells")
+	assert.Equal(t, "$run_state", classic.Agents[2][0].Token)
+	assert.Equal(t, "$run_age", classic.Agents[2][1].Token)
+	assert.Equal(t, "$split_mark", classic.Agents[2][2].Token, "every other cell keeps its place")
+	assert.Len(t, logger.debugs, 1, "the dropped signal is logged once across agent rows")
+	assert.Empty(t, logger.warns)
 }

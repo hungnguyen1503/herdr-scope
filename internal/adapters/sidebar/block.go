@@ -114,16 +114,7 @@ func agentRows(kind domain.AgentKind, p Presentation, appearance ports.Appearanc
 		}, titles...)
 	}
 	if p.RunLine {
-		runCells := []Cell{
-			cell("$run_state", c.Subtle, false),
-			cell("$run_signal", c.Subtle, false),
-			cell("$run_age", c.IdleStale, false),
-		}
-		if len(runCells)+len(line) <= rowTokenLimit {
-			line = append(runCells, line...)
-		} else {
-			p.warnRunLineOverflow(len(runCells) + len(line))
-		}
+		line = append(runLineCells(line, c, p), line...)
 	}
 	return [][]Cell{
 		// A synthesised parent for a worktree whose checkout runs no agent, or
@@ -136,12 +127,40 @@ func agentRows(kind domain.AgentKind, p Presentation, appearance ports.Appearanc
 	}
 }
 
-func (p Presentation) warnRunLineOverflow(would int) {
+// runLineCells picks the run cells that still fit beside a line: the most
+// valuable first ($run_state, then $run_age, then $run_signal), stopping at
+// Herdr's per-row token ceiling. Classic spends ten cells on furniture and
+// logos and therefore takes two; compact takes all three. Dropping the lowest
+// one beats dropping every one, which is what an all-or-nothing prepend did.
+func runLineCells(line []Cell, c stateColors, p Presentation) []Cell {
+	candidates := []Cell{
+		cell("$run_state", c.Subtle, false),
+		cell("$run_age", c.IdleStale, false),
+		cell("$run_signal", c.Subtle, false),
+	}
+	var cells []Cell
+	for _, candidate := range candidates {
+		if len(cells)+1+len(line) > rowTokenLimit {
+			break
+		}
+		cells = append(cells, candidate)
+	}
+	if dropped := len(candidates) - len(cells); dropped > 0 {
+		p.debugRunLineDropped(dropped)
+	}
+	return cells
+}
+
+// debugRunLineDropped names the layout and the loss once, at debug level: a
+// row that lost run cells is worth diagnosing, but it is not an error and a
+// warning per frame would bury the log.
+func (p Presentation) debugRunLineDropped(dropped int) {
 	if p.Logger == nil {
 		return
 	}
 	log := func() {
-		p.Logger.Warn("run_line skipped: row would exceed Herdr token limit", "tokens", would, "limit", rowTokenLimit)
+		p.Logger.Debug("run_line: dropped cells that exceed Herdr's row token limit",
+			"layout", string(cmp.Or(p.Layout, ports.LayoutClassic)), "dropped", dropped, "limit", rowTokenLimit)
 	}
 	if p.runLineOnce != nil {
 		p.runLineOnce.Do(log)
