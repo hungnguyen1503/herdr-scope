@@ -742,3 +742,87 @@ func TestPinnedRowDoesNotMoveWhileFocused(t *testing.T) {
 		})
 	}
 }
+
+// TestTriagePutsARunOwnerAboveEveryTier proves the chief case: the engineer's
+// own pane must never be shuffled below a worker it launched, even when that
+// worker has signalled done. Without the owner set the same input must produce
+// today's order, so run_root being unset changes nothing.
+func TestTriagePutsARunOwnerAboveEveryTier(t *testing.T) {
+	now := at(0)
+	// The chief sits in its own workspace with a quiet, idle history; the
+	// worker in another has just signalled done and travels with its family.
+	base := (&scenario{}).
+		ws("w-chief", "chief", nil).
+		ws("w-worker", "worker", repo("app", false, "/src/app")).
+		ws("w-wt", "app/wt", repo("app", true, "/wt/app")).
+		agent("w-chief", "t1", "p1", 200, DisplayIdleStale).
+		agent("w-worker", "t1", "p1", 1, DisplayDone).
+		agent("w-wt", "t1", "p1", 40, DisplayBlocked)
+	for i := range base.agents {
+		if base.agents[i].Display == DisplayBlocked {
+			base.agents[i].Since = now.Add(-5 * time.Minute)
+		}
+	}
+	runs := map[PaneID]RunMeta{
+		"w-worker:p1": {RunID: "run-w", State: "awaiting-review", OwnerPane: "w-chief:p1"},
+		"w-wt:p1":     {RunID: "run-x", State: "running", OwnerPane: "w-chief:p1"},
+	}
+
+	build := func(mode SortMode, owners map[PaneID]struct{}, runRootSet bool) SidebarView {
+		return BuildSidebar(SidebarInput{
+			At: now, Mode: mode, Policy: DefaultDisplayPolicy(),
+			Workspaces: base.workspaces, Tabs: base.tabs, Agents: base.agents,
+			Runs: runs, RunRootSet: runRootSet, RunOwners: owners,
+		})
+	}
+	owners := map[PaneID]struct{}{"w-chief:p1": {}}
+
+	t.Run("an owner row outranks a blocked worker", func(t *testing.T) {
+		v := build(SortTriage, owners, true)
+		assert.Equal(t, []string{
+			"# chief (stale)", "0 w-chief:p1", "",
+			"# worker", "0 w-worker:p1", "# └ app/wt", "1 w-wt:p1", "",
+		}, outline(v))
+		chiefAt, chiefKeys, chiefDisplay := rowIndex(t, v, "w-chief:p1")
+		workerAt, workerKeys, _ := rowIndex(t, v, "w-worker:p1")
+		assert.Equal(t, 1, chiefAt, "the chief is the first row under its header")
+		assert.Equal(t, DisplayIdleStale, chiefDisplay, "the paint is untouched: it really is an idle row")
+		assert.Less(t, chiefAt, workerAt)
+		assert.Greater(t, chiefKeys.Pane, workerKeys.Pane, "the pane key carries the tier")
+		assert.Greater(t, chiefKeys.Workspace, workerKeys.Workspace, "and the workspace rolls it up")
+	})
+
+	t.Run("without the owner set today's order is byte-identical", func(t *testing.T) {
+		without := build(SortTriage, nil, true)
+		assert.Equal(t, []string{
+			"# worker", "0 w-worker:p1", "# └ app/wt", "1 w-wt:p1", "",
+			"# chief (stale)", "0 w-chief:p1",
+		}, outline(without), "without owners the done worker still floats above the idle chief")
+		// and the same set with run_root off leaves everything as it was.
+		assert.Equal(t, outline(without), outline(build(SortTriage, owners, false)))
+	})
+
+	t.Run("an owner's workspace rises with its row", func(t *testing.T) {
+		v := build(SortTriage, owners, true)
+		_, chiefKeys, _ := rowIndex(t, v, "w-chief:p1")
+		_, workerKeys, _ := rowIndex(t, v, "w-worker:p1")
+		assert.Greater(t, chiefKeys.Workspace, workerKeys.Workspace, "the chief's workspace travels above the blocked worker's family")
+		assert.Equal(t, "9", chiefKeys.Workspace[:1], "and the family key carries the owner tier")
+	})
+
+	t.Run("a worker carrying a run is not an owner", func(t *testing.T) {
+		// The ledger matched runs to both worker panes; only the owner's pane
+		// takes the top tier, so the worker keeps its own done tier.
+		v := build(SortTriage, owners, true)
+		_, workerKeys, _ := rowIndex(t, v, "w-worker:p1")
+		_, blockedKeys, _ := rowIndex(t, v, "w-wt:p1")
+		assert.Equal(t, "6", workerKeys.Pane[:1], "the worker sorts by its done tier, not the top tier")
+		assert.Equal(t, "7", blockedKeys.Pane[:1], "and the blocked worktree by its own tier")
+	})
+
+	t.Run("other orders ignore the owner set", func(t *testing.T) {
+		for _, mode := range []SortMode{SortActive, SortRecent, SortHere, SortOff} {
+			assert.Equal(t, outline(build(mode, nil, true)), outline(build(mode, owners, true)), mode)
+		}
+	})
+}

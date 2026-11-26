@@ -70,6 +70,9 @@ type Observer struct {
 	needAgents  bool
 	repoCache   map[string]repoLookup
 	runs        map[domain.PaneID]domain.RunMeta
+	// runOwners are the panes that launched a run (the engineer's own
+	// sessions), collected from the same ledger read as runs.
+	runOwners map[domain.PaneID]struct{}
 	// pins freeze a focused row's ordering keys. Clicking a row focuses its
 	// pane, which clears the ✓ and demotes the display; without the freeze
 	// the row would then jump away from the cursor.
@@ -156,7 +159,7 @@ func (o *Observer) Settings() ports.Settings { return o.settings }
 func (o *Observer) UpdateSettings(settings ports.Settings) {
 	o.settings = settings
 	if settings.RunRoot == "" {
-		o.runs = nil
+		o.runs, o.runOwners = nil, nil
 	}
 	o.needAgents = true
 	o.resolveTree()
@@ -360,7 +363,7 @@ func (o *Observer) project(ctx context.Context, now time.Time, grouped bool) {
 		At: now, Mode: o.mode, HostGrouped: grouped, Policy: o.settings.Policy,
 		Workspaces: o.session.Workspaces, Tabs: o.session.Tabs, Home: o.session.Home, Agents: observed,
 		Folded: o.folded(), Focused: o.focused, Opened: o.opened, Tree: &o.tree,
-		Runs: o.runs, RunRootSet: o.settings.RunRoot != "",
+		Runs: o.runs, RunRootSet: o.settings.RunRoot != "", RunOwners: o.runOwners,
 		Pinned: pinned,
 	})
 	o.stale, o.projectedAt, o.grouped, o.due = false, now, grouped, time.Time{}
@@ -453,8 +456,8 @@ func (o *Observer) refresh(ctx context.Context, now time.Time) error {
 
 func (o *Observer) refreshRuns(ctx context.Context) {
 	if o.settings.RunRoot == "" || o.deps.RunLedger == nil {
-		if len(o.runs) > 0 {
-			o.runs = nil
+		if len(o.runs) > 0 || len(o.runOwners) > 0 {
+			o.runs, o.runOwners = nil, nil
 			o.stale = true
 		}
 		return
@@ -465,8 +468,9 @@ func (o *Observer) refreshRuns(ctx context.Context) {
 		return
 	}
 	next := ports.MatchRuns(o.session.Agents, records)
-	if !maps.Equal(next, o.runs) {
-		o.runs = next
+	owners := ports.RunOwners(records)
+	if !maps.Equal(next, o.runs) || !maps.Equal(owners, o.runOwners) {
+		o.runs, o.runOwners = next, owners
 		o.stale = true
 	}
 }

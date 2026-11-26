@@ -287,6 +287,23 @@ func MatchRuns(agents []domain.Agent, records []RunRecord) map[domain.PaneID]dom
 	return out
 }
 
+// RunOwners collects the panes that own a run — the engineer's own sessions.
+// A pane only carrying a worker run is not an owner; only the record's
+// OwnerPane counts.
+func RunOwners(records []RunRecord) map[domain.PaneID]struct{} {
+	var out map[domain.PaneID]struct{}
+	for _, rec := range records {
+		if rec.OwnerPane == "" {
+			continue
+		}
+		if out == nil {
+			out = map[domain.PaneID]struct{}{}
+		}
+		out[domain.PaneID(rec.OwnerPane)] = struct{}{}
+	}
+	return out
+}
+
 // Logger is structured logging. *slog.Logger satisfies it.
 type Logger interface {
 	Debug(msg string, args ...any)

@@ -44,7 +44,7 @@ func minuteKey(activity Activity) string {
 // triageKey encodes who needs the engineer first (rank descending) and, within
 // a rank, longest wait first by inverting the minute stamp against maxMinute
 // (earliest Since -> largest string); unknown waits sort last in the rank.
-func triageKey(display DisplayState, since time.Time, run *RunMeta, runRootSet bool) string {
+func triageKey(display DisplayState, since time.Time, run *RunMeta, runRootSet, owner bool) string {
 	if since.IsZero() && runRootSet && run != nil {
 		if !run.SignalReceivedAt.IsZero() {
 			since = run.SignalReceivedAt
@@ -62,10 +62,18 @@ func triageKey(display DisplayState, since time.Time, run *RunMeta, runRootSet b
 		}
 		wait = key
 	}
-	return triageRank(display, run, runRootSet) + "-" + wait
+	return triageRank(display, run, runRootSet, owner) + "-" + wait
 }
 
-func triageRank(display DisplayState, run *RunMeta, runRootSet bool) string {
+// triageRank is the tier a row sits in, descending. A run owner — the pane
+// that launched the workers — takes the top tier whatever it is displaying: an
+// engineer's own session must never be shuffled below a worker it launched and
+// has already signalled. Inside that tier the wait/activity tie-break still
+// orders two owners sensibly.
+func triageRank(display DisplayState, run *RunMeta, runRootSet, owner bool) string {
+	if owner {
+		return "9"
+	}
 	if runRootSet && run != nil {
 		if run.SignalStatus == "failed" || run.SignalStatus == "blocked" {
 			return "8"
@@ -156,7 +164,7 @@ func (r ranking) family(ws WorkspaceID) WorkspaceID {
 // contiguous, parent first. When the parent runs no agent the members still
 // stay together, under a synthesised parent row (orphanRepo: the folder's
 // name, or the repository's).
-func rank(entries []orderEntry, tree WorktreeTree, mode SortMode, runRootSet bool, pinned map[PaneID]SortKeys) ranking {
+func rank(entries []orderEntry, tree WorktreeTree, mode SortMode, runRootSet bool, owners map[PaneID]struct{}, pinned map[PaneID]SortKeys) ranking {
 	r := ranking{
 		pane: make(map[PaneID]string, len(entries)), workspace: map[WorkspaceID]string{},
 		tab: make(map[PaneID]string, len(entries)), parentOf: map[WorkspaceID]WorkspaceID{},
@@ -170,7 +178,8 @@ func rank(entries []orderEntry, tree WorktreeTree, mode SortMode, runRootSet boo
 	for i, e := range entries {
 		key := minuteKey(e.activity)
 		if mode == SortTriage {
-			key = triageKey(e.display, e.since, e.run, runRootSet)
+			_, owner := owners[e.agent.Pane]
+			key = triageKey(e.display, e.since, e.run, runRootSet, owner && runRootSet)
 		}
 		// A focused row keeps the key it had before the focus cleared its ✓:
 		// substituting it here, before the workspace and tab roll-ups read

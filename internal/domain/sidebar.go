@@ -165,6 +165,10 @@ type SidebarInput struct {
 	// Runs holds matched run-ledger metadata per pane when run_root is set.
 	Runs       map[PaneID]RunMeta
 	RunRootSet bool
+	// RunOwners are the panes that launched runs — the engineer's own
+	// sessions. Under triage they outrank every display tier, so a worker a
+	// chief already finished never floats above the chief.
+	RunOwners map[PaneID]struct{}
 	// Pinned freezes these panes' ordering keys: the keys the row had on the
 	// frame before it gained focus. Looking at a row clears its ✓, and that
 	// demotion must not slide the row out from under the cursor.
@@ -210,7 +214,7 @@ func BuildSidebar(in SidebarInput) SidebarView {
 	} else {
 		tree = ResolveTree(in.Workspaces, in.Policy.NestFolders, in.Home)
 	}
-	ranks := rank(entries, tree, in.Mode, in.RunRootSet, in.Pinned)
+	ranks := rank(entries, tree, in.Mode, in.RunRootSet, in.RunOwners, in.Pinned)
 	grouped := in.Mode.Grouped(in.HostGrouped)
 	ordered := displayOrder(entries, in.Mode, ranks)
 	ranks = detachStrays(ordered, ranks)
