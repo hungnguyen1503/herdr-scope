@@ -156,7 +156,7 @@ func (r ranking) family(ws WorkspaceID) WorkspaceID {
 // contiguous, parent first. When the parent runs no agent the members still
 // stay together, under a synthesised parent row (orphanRepo: the folder's
 // name, or the repository's).
-func rank(entries []orderEntry, tree WorktreeTree, mode SortMode, runRootSet bool) ranking {
+func rank(entries []orderEntry, tree WorktreeTree, mode SortMode, runRootSet bool, pinned map[PaneID]SortKeys) ranking {
 	r := ranking{
 		pane: make(map[PaneID]string, len(entries)), workspace: map[WorkspaceID]string{},
 		tab: make(map[PaneID]string, len(entries)), parentOf: map[WorkspaceID]WorkspaceID{},
@@ -171,6 +171,12 @@ func rank(entries []orderEntry, tree WorktreeTree, mode SortMode, runRootSet boo
 		key := minuteKey(e.activity)
 		if mode == SortTriage {
 			key = triageKey(e.display, e.since, e.run, runRootSet)
+		}
+		// A focused row keeps the key it had before the focus cleared its ✓:
+		// substituting it here, before the workspace and tab roll-ups read
+		// keys[i], also keeps the family it leads where the family was.
+		if pin, ok := pinned[e.agent.Pane]; ok && pin.Pane != "" {
+			key = pin.Pane
 		}
 		keys[i] = key
 		r.pane[e.agent.Pane] = key

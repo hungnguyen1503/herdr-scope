@@ -165,6 +165,10 @@ type SidebarInput struct {
 	// Runs holds matched run-ledger metadata per pane when run_root is set.
 	Runs       map[PaneID]RunMeta
 	RunRootSet bool
+	// Pinned freezes these panes' ordering keys: the keys the row had on the
+	// frame before it gained focus. Looking at a row clears its ✓, and that
+	// demotion must not slide the row out from under the cursor.
+	Pinned map[PaneID]SortKeys
 }
 
 // spacePriority is which agent a workspace's single mark speaks for: a
@@ -206,7 +210,7 @@ func BuildSidebar(in SidebarInput) SidebarView {
 	} else {
 		tree = ResolveTree(in.Workspaces, in.Policy.NestFolders, in.Home)
 	}
-	ranks := rank(entries, tree, in.Mode, in.RunRootSet)
+	ranks := rank(entries, tree, in.Mode, in.RunRootSet, in.Pinned)
 	grouped := in.Mode.Grouped(in.HostGrouped)
 	ordered := displayOrder(entries, in.Mode, ranks)
 	ranks = detachStrays(ordered, ranks)

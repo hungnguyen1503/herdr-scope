@@ -659,3 +659,86 @@ func TestTriageOrderWithRunLedger(t *testing.T) {
 		assert.Equal(t, outline(buildWith(mode, false)), outline(buildWith(mode, true)), mode)
 	}
 }
+
+// rowIndex is a row's position in the flattened view: headers count, so the
+// number is where the cursor would sit.
+func rowIndex(t *testing.T, v SidebarView, pane PaneID) (int, SortKeys, DisplayState) {
+	t.Helper()
+	i := 0
+	for _, g := range v.Groups {
+		if g.Header {
+			i++
+		}
+		for _, r := range g.Rows {
+			if r.Pane == pane {
+				return i, r.Keys, r.Display
+			}
+			i++
+		}
+	}
+	t.Fatalf("row %s not in the view", pane)
+	return 0, SortKeys{}, ""
+}
+
+// clickScenario is a worktree family whose checked-off member leads it: the
+// checkout, its worktree carrying the unseen ✓, and a working neighbour.
+// A click focuses the ✓ row and clears it, which is exactly what demoted it.
+func clickScenario() *scenario {
+	return (&scenario{}).
+		ws("w1", "app", repo("app", false, "/src/app")).
+		ws("w2", "app-wt", repo("app", true, "/src/app-wt")).
+		ws("w3", "other", nil).
+		agent("w1", "t1", "p1", 90, DisplayIdle).
+		agent("w2", "t1", "p2", 5, DisplayDone).
+		agent("w3", "t1", "p3", 1, DisplayWorking)
+}
+
+func (s *scenario) buildPinned(mode SortMode, pinned map[PaneID]SortKeys) SidebarView {
+	return BuildSidebar(SidebarInput{
+		At: at(0), Mode: mode, Policy: spaced(), Workspaces: s.workspaces, Tabs: s.tabs,
+		Agents: s.agents, Pinned: pinned,
+	})
+}
+
+func TestPinnedRowDoesNotMoveWhileFocused(t *testing.T) {
+	cases := []struct {
+		name string
+		mode SortMode
+		// wantMoves is whether clearing the ✓ alone would move the row.
+		wantMoves bool
+	}{
+		// Triage ranks done (6) over working (5) over idle-fresh (4), and the
+		// family rolls up its best member, so losing the ✓ drops both.
+		{"triage demotes on release", SortTriage, true},
+		// Active, here and recent key on activity alone: the ✓ never ranked.
+		{"active is unaffected", SortActive, false},
+		{"recent is unaffected", SortRecent, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := clickScenario()
+			before := s.build(tc.mode, spaced())
+			at, keys, _ := rowIndex(t, before, "w2:p2")
+
+			// The click: focus clears the ✓, so the row paints idle-fresh.
+			s.agents[1].Display = DisplayIdleFresh
+			pinned := s.buildPinned(tc.mode, map[PaneID]SortKeys{"w2:p2": keys})
+
+			gotAt, gotKeys, gotDisplay := rowIndex(t, pinned, "w2:p2")
+			assert.Equal(t, at, gotAt, "the focused row does not move")
+			assert.Equal(t, keys, gotKeys, "its three published keys are byte-identical")
+			assert.Equal(t, DisplayIdleFresh, gotDisplay, "the paint stays honest: ✓ cleared, row reads idle-fresh")
+			assert.Equal(t, outline(before), outline(pinned), "nothing around it moves either, the family included")
+
+			released := s.build(tc.mode, spaced())
+			releasedAt, releasedKeys, _ := rowIndex(t, released, "w2:p2")
+			if tc.wantMoves {
+				assert.NotEqual(t, keys, releasedKeys, "released, the row sorts by its own key")
+				assert.NotEqual(t, at, releasedAt, "releasing the pin lets the row drop to its real rank")
+			} else {
+				assert.Equal(t, keys, releasedKeys, "activity alone was frozen: the ✓ never ranked, so the keys are the same")
+				assert.Equal(t, at, releasedAt, "and in this order the position never changed either")
+			}
+		})
+	}
+}

@@ -646,3 +646,98 @@ func TestObserverRunLedgerLifecycle(t *testing.T) {
 	frame(t, f)
 	assert.Nil(t, f.sidebar.last().Groups[0].Rows[0].Run)
 }
+
+// pinRow finds a pane's painted row: its index, keys and display.
+func pinRow(t *testing.T, v domain.SidebarView, pane domain.PaneID) (int, domain.SortKeys, domain.DisplayState) {
+	t.Helper()
+	i := 0
+	for _, g := range v.Groups {
+		if g.Header {
+			i++
+		}
+		for _, r := range g.Rows {
+			if r.Pane == pane {
+				return i, r.Keys, r.Display
+			}
+			i++
+		}
+	}
+	t.Fatalf("row %s not painted", pane)
+	return 0, domain.SortKeys{}, ""
+}
+
+// focusFixture is a worktree family whose checked-off member leads it: the
+// checkout (w1), its worktree w2 carrying the unseen ✓, and a working
+// neighbour (w3) that the family would otherwise trail.
+func focusFixture(t *testing.T) *fixture {
+	t.Helper()
+	repo := func(checkout string, linked bool) *domain.RepositoryInfo {
+		return &domain.RepositoryInfo{ID: "/src/app/.git", Name: "app", Root: "/src/app", Checkout: domain.WorktreeID(checkout), Linked: linked}
+	}
+	agents := []domain.Agent{
+		{ID: "a1", Pane: "w1:p1", Tab: "w1:t1", Workspace: "w1", Terminal: "t1", Kind: "claude", Status: domain.StatusIdle, Title: "checkout"},
+		{ID: "a2", Pane: "w2:p2", Tab: "w2:t1", Workspace: "w2", Terminal: "t2", Kind: "claude", Status: domain.StatusIdle, Showing: domain.DisplayDone, Title: "done"},
+		{ID: "a3", Pane: "w3:p3", Tab: "w3:t1", Workspace: "w3", Terminal: "t3", Kind: "claude", Status: domain.StatusWorking, Title: "busy"},
+	}
+	f := newFixture(agents...)
+	f.herdr.session.Workspaces = []domain.Workspace{
+		{ID: "w1", Label: "app", Repository: repo("/src/app", false)},
+		{ID: "w2", Label: "app-wt", Repository: repo("/src/app-wt", true)},
+		{ID: "w3", Label: "other"},
+	}
+	f.herdr.session.Tabs = []domain.Tab{
+		{ID: "w1:t1", Workspace: "w1", Label: "1"},
+		{ID: "w2:t1", Workspace: "w2", Label: "1"},
+		{ID: "w3:t1", Workspace: "w3", Label: "1"},
+	}
+	f.observer.SetMode(domain.SortTriage)
+	return f
+}
+
+func TestFocusFreezesRowKeys(t *testing.T) {
+	f := focusFixture(t)
+	frame(t, f)
+
+	at, keys, display := pinRow(t, f.sidebar.last(), "w2:p2")
+	require.Equal(t, domain.DisplayDone, display, "the ✓ leads its family before the click")
+
+	// The click: the pane gains focus, the ✓ clears, the host republishes the
+	// row's tokens as idle.
+	f.herdr.update(func(s *domain.Session) {
+		s.Agents[1].Focused = true
+		s.Agents[1].Showing = domain.DisplayIdle
+	})
+	f.clock.advance(2 * time.Second)
+	frame(t, f)
+
+	gotAt, gotKeys, gotDisplay := pinRow(t, f.sidebar.last(), "w2:p2")
+	assert.Equal(t, at, gotAt, "the focused row keeps its place")
+	assert.Equal(t, keys, gotKeys, "its keys are frozen to the pre-focus frame")
+	assert.Equal(t, domain.DisplayIdle, gotDisplay, "the paint stays honest: ✓ cleared, row token reads idle")
+
+	checkoutAt := func() int {
+		n, _, _ := pinRow(t, f.sidebar.last(), "w1:p1")
+		return n
+	}
+	before := checkoutAt()
+
+	// A real new turn while focused releases the freeze at once: the row sorts
+	// by its own key and its family re-sorts around it, at once, not on the
+	// next focus.
+	f.herdr.setStatus("w2:p2", domain.StatusWorking)
+	f.clock.advance(2 * time.Second)
+	frame(t, f)
+	turnAt, turnKeys, turnDisplay := pinRow(t, f.sidebar.last(), "w2:p2")
+	assert.Equal(t, domain.DisplayWorking, turnDisplay)
+	assert.NotEqual(t, keys, turnKeys, "a new turn sorts by its own key")
+	assert.NotEqual(t, at, turnAt, "and moves the row at once, not on the next focus")
+	assert.NotEqual(t, before, checkoutAt(), "its family moves with it")
+
+	// Losing focus drops the pin for good: the row then sorts by its own key.
+	f.herdr.update(func(s *domain.Session) { s.Agents[1].Focused = false })
+	f.clock.advance(2 * time.Second)
+	frame(t, f)
+	assert.Empty(t, f.observer.pins, "losing focus drops the pin")
+	_, releasedKeys, _ := pinRow(t, f.sidebar.last(), "w2:p2")
+	assert.Equal(t, turnKeys, releasedKeys, "with no pin the row keeps sorting by its own key")
+}

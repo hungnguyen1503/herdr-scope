@@ -70,7 +70,15 @@ type Observer struct {
 	needAgents  bool
 	repoCache   map[string]repoLookup
 	runs        map[domain.PaneID]domain.RunMeta
-	view        domain.SidebarView
+	// pins freeze a focused row's ordering keys. Clicking a row focuses its
+	// pane, which clears the ✓ and demotes the display; without the freeze
+	// the row would then jump away from the cursor.
+	pins map[domain.PaneID]pinEntry
+	// focusedPanes is the focus set of the last frame, so that only a row
+	// that just gained focus is captured: a row whose status changed while
+	// focused must sort by its new key, not re-freeze the old one.
+	focusedPanes map[domain.PaneID]bool
+	view         domain.SidebarView
 
 	// stale is set by whatever the projection reads — the model, settings,
 	// mode, folds, focus — and by a side effect of a frame that has to be
@@ -103,20 +111,30 @@ type repoLookup struct {
 	at   time.Time
 }
 
+// pinEntry is a focused row's frozen sort keys, plus the status it was
+// captured under: a new reported status (a real turn, a blocked question)
+// releases the freeze.
+type pinEntry struct {
+	keys   domain.SortKeys
+	status domain.AgentStatus
+}
+
 // NewObserver builds an observer from persisted memory. The first frame
 // always reconciles.
 func NewObserver(deps ObserverDeps, settings ports.Settings, mode domain.SortMode, records []domain.AgentSession) *Observer {
 	o := &Observer{
-		deps:        deps,
-		settings:    settings,
-		mode:        mode,
-		memory:      domain.NewMemory(records),
-		folds:       map[string]bool{},
-		opened:      map[domain.WorkspaceID]bool{},
-		needSession: true,
-		needAgents:  true,
-		repoCache:   map[string]repoLookup{},
-		stale:       true,
+		deps:         deps,
+		settings:     settings,
+		mode:         mode,
+		memory:       domain.NewMemory(records),
+		folds:        map[string]bool{},
+		opened:       map[domain.WorkspaceID]bool{},
+		needSession:  true,
+		needAgents:   true,
+		repoCache:    map[string]repoLookup{},
+		pins:         map[domain.PaneID]pinEntry{},
+		focusedPanes: map[domain.PaneID]bool{},
+		stale:        true,
 	}
 	o.resolveTree()
 	if deps.Folds != nil {
@@ -337,16 +355,85 @@ func (o *Observer) project(ctx context.Context, now time.Time, grouped bool) {
 	}
 	o.stats.Agents = len(agents)
 
+	pinned := o.maintainPins(agents)
 	o.view = domain.BuildSidebar(domain.SidebarInput{
 		At: now, Mode: o.mode, HostGrouped: grouped, Policy: o.settings.Policy,
 		Workspaces: o.session.Workspaces, Tabs: o.session.Tabs, Home: o.session.Home, Agents: observed,
 		Folded: o.folded(), Focused: o.focused, Opened: o.opened, Tree: &o.tree,
 		Runs: o.runs, RunRootSet: o.settings.RunRoot != "",
+		Pinned: pinned,
 	})
 	o.stale, o.projectedAt, o.grouped, o.due = false, now, grouped, time.Time{}
 	if len(deadlines) > 0 {
 		o.due = slices.MinFunc(deadlines, time.Time.Compare)
 	}
+}
+
+// maintainPins keeps the focused-row freeze in step with the model and returns
+// the pins for this frame's SidebarInput. A row is captured when it first
+// gains focus, from the keys the last frame published for it — the frame
+// before the focus cleared its ✓. The freeze ends the moment the agent loses
+// focus, leaves the session, or reports a different status: a real new turn or
+// a blocked question must still move the row, and it must do so now, not on
+// the next focus.
+func (o *Observer) maintainPins(agents []domain.Agent) map[domain.PaneID]domain.SortKeys {
+	current := make(map[domain.PaneID]domain.Agent, len(agents))
+	focusedNow := make(map[domain.PaneID]bool, len(agents))
+	for _, a := range agents {
+		current[a.Pane] = a
+		if a.Focused {
+			focusedNow[a.Pane] = true
+		}
+	}
+	for pane := range o.pins {
+		agent, ok := current[pane]
+		switch {
+		case !ok || !agent.Focused:
+			delete(o.pins, pane)
+		case agent.Status != o.pins[pane].status:
+			delete(o.pins, pane)
+		}
+	}
+	if len(focusedNow) > 0 {
+		before := o.publishedKeys()
+		for pane := range focusedNow {
+			if o.focusedPanes[pane] {
+				continue
+			}
+			if _, pinned := o.pins[pane]; pinned {
+				continue
+			}
+			// No key means the row had no activity stamp: it already sorted
+			// last, and there is nothing to hold.
+			if keys, ok := before[pane]; ok && keys.Pane != "" {
+				o.pins[pane] = pinEntry{keys: keys, status: current[pane].Status}
+			}
+		}
+	}
+	o.focusedPanes = focusedNow
+	if len(o.pins) == 0 {
+		return nil
+	}
+	pinned := make(map[domain.PaneID]domain.SortKeys, len(o.pins))
+	for pane, pin := range o.pins {
+		pinned[pane] = pin.keys
+	}
+	return pinned
+}
+
+// publishedKeys is the sort keys the last frame gave each row, folded rows
+// included.
+func (o *Observer) publishedKeys() map[domain.PaneID]domain.SortKeys {
+	keys := make(map[domain.PaneID]domain.SortKeys, len(o.session.Agents))
+	for _, g := range o.view.Groups {
+		for _, r := range g.Rows {
+			keys[r.Pane] = r.Keys
+		}
+	}
+	for _, r := range o.view.Folded {
+		keys[r.Pane] = r.Keys
+	}
+	return keys
 }
 
 func (o *Observer) refresh(ctx context.Context, now time.Time) error {
