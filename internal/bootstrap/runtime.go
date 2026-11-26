@@ -23,6 +23,7 @@ import (
 	"github.com/kriuchkov/herdr-scope/internal/adapters/font"
 	"github.com/kriuchkov/herdr-scope/internal/adapters/git"
 	"github.com/kriuchkov/herdr-scope/internal/adapters/herdr"
+	"github.com/kriuchkov/herdr-scope/internal/adapters/runledger"
 	"github.com/kriuchkov/herdr-scope/internal/adapters/sidebar"
 	"github.com/kriuchkov/herdr-scope/internal/adapters/state"
 	"github.com/kriuchkov/herdr-scope/internal/application"
@@ -63,6 +64,7 @@ type Runtime struct {
 	Endpoint   string
 	TabBar     *filesystem.TabBar
 	Activity   *filesystem.Activity
+	RunLedger  *runledger.Ledger
 }
 
 // settingsHolder is the settings in force, swapped on reload.
@@ -126,6 +128,7 @@ func NewRuntime(ctx context.Context, build Build, stdout, stderr io.Writer) *Run
 	r.Control = control.Client{Endpoint: r.Endpoint}
 	r.TabBar = filesystem.NewTabBar(r.Client, paths.TabBarCache(os.Getenv("HERDR_SESSION")), home, git.Branch, writeAtomic, time.Now)
 	r.Activity = filesystem.NewActivity(os.Getenv, home, sqliteRunner())
+	r.RunLedger = runledger.New(settings.RunRoot, r.Logger, time.Now)
 	r.Managed = config.NewManaged(config.ManagedDeps{
 		File:     paths.HerdrConfig,
 		StateDir: paths.StateDir,
@@ -150,12 +153,15 @@ func (r *Runtime) Settings() ports.Settings { return r.settings.get() }
 // only where the terminal can draw it (fontconfig on Linux, a codepoint map
 // in a Ghostty/kitty config, or a patched face in iTerm2's default profile).
 func (r *Runtime) presentation(settings ports.Settings) sidebar.Presentation {
-	return sidebar.NewPresentation(settings, r.Fonts.Renderable)
+	p := sidebar.NewPresentation(settings, r.Fonts.Renderable)
+	p.Logger = r.Logger
+	return p
 }
 
 // applySettings makes new settings the ones in force everywhere.
 func (r *Runtime) applySettings(settings ports.Settings) {
 	r.settings.set(settings)
+	r.RunLedger.SetRoot(settings.RunRoot)
 	r.Writer.get().Configure(r.presentation(settings))
 }
 
@@ -206,7 +212,7 @@ func (r *Runtime) observerDeps(logger ports.Logger) application.ObserverDeps {
 	return application.ObserverDeps{
 		Agents: r.Observer, Session: r.Observer, Activity: r.Activity, Repositories: git.Resolver{},
 		State: r.State, Sidebar: r.Writer, Host: r.Managed, Mover: r.Client, Folds: r.State,
-		Clock: clock{}, Logger: logger,
+		RunLedger: r.RunLedger, Clock: clock{}, Logger: logger,
 	}
 }
 

@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -306,7 +308,28 @@ func TestSpaceTokens(t *testing.T) {
 	tokens = p.SpaceTokens(domain.SpaceView{Mark: domain.DisplayIdleStale}, at0())
 	assert.Equal(t, "·", val(t, tokens, "space_idle"), "idle tiers share one cell")
 	assert.LessOrEqual(t, len(spaceTokenNames()), 32, "a workspace holds at most 32 tokens")
-	assert.LessOrEqual(t, len(paneTokenNames()), 32, "a pane holds at most 32 tokens")
+	for _, name := range []string{"run_state", "run_signal", "run_age", "run_machine", "run_owner", "run_repo"} {
+		assert.Contains(t, paneTokenNames(), name)
+	}
+	popView, popGroup := rowView(domain.SidebarRow{
+		Pane: "w1:p1", Workspace: "w1", Kind: "claude", Display: domain.DisplayWorking, Title: "Ship it",
+		TabLabel: "tab", Depth: 1, Corner: domain.CornerTee,
+		Keys: domain.SortKeys{Pane: "1", Workspace: "2", Tab: "3"},
+		Fold: &domain.Fold{Root: "w1", Label: "app", Hidden: 1},
+		Run: &domain.RunMeta{
+			State: "running", SignalStatus: "done", StepStartedAt: at0().Add(-5 * time.Minute),
+			Machine: "devbox", OwnerPane: "w0:p1", RepoID: "herdr-scope",
+		},
+	}, true)
+	popGroup.OrphanRepo = "app"
+	popView.Groups[0] = popGroup
+	setCount := 0
+	for _, v := range textPresentation().PaneTokens(popView, popGroup, 0) {
+		if v != nil {
+			setCount++
+		}
+	}
+	assert.LessOrEqual(t, setCount, 32, "a populated pane sets at most 32 tokens")
 }
 
 func TestCompactLineIsOneCell(t *testing.T) {
@@ -537,4 +560,37 @@ func TestIdleLogosTakeTheirTitlesColour(t *testing.T) {
 	assert.Empty(t, val(t, tokens, "space_logo_gemini"))
 	assert.Empty(t, val(t, tokens, "space_logo_other"))
 	assert.Equal(t, "✦ gemini Λ codex", val(t, tokens, "space_logo_idle"), "vendors with nothing going on share a grey cell")
+}
+
+func TestRunTokensPublishedNormalizedAndCleared(t *testing.T) {
+	p := textPresentation()
+	view, g := rowView(domain.SidebarRow{
+		Pane: "w1:p1", Workspace: "w1", Kind: "claude", Display: domain.DisplayIdle, Title: "task",
+	}, true)
+	tokens := p.PaneTokens(view, g, 0)
+	for _, name := range []string{"run_state", "run_signal", "run_age", "run_machine", "run_owner", "run_repo"} {
+		assert.Empty(t, val(t, tokens, name), "no run matched clears %s", name)
+	}
+
+	longRepo := "Herdr-Scope-" + strings.Repeat("X", 90)
+	view, g = rowView(domain.SidebarRow{
+		Pane: "w1:p1", Workspace: "w1", Kind: "claude", Display: domain.DisplayWorking, Title: "task",
+		Run: &domain.RunMeta{
+			State:         "Awaiting-Review",
+			SignalStatus:  "BLOCKED✓",
+			StepStartedAt: at0().Add(-15 * time.Second),
+			Machine:       "Box-01",
+			OwnerPane:     "W0:P2",
+			RepoID:        longRepo,
+		},
+	}, true)
+	tokens = p.PaneTokens(view, g, 0)
+	assert.Equal(t, "awaiting-review", val(t, tokens, "run_state"))
+	assert.Equal(t, "blocked", val(t, tokens, "run_signal"))
+	assert.Equal(t, "0m", val(t, tokens, "run_age"))
+	assert.Equal(t, "box-01", val(t, tokens, "run_machine"))
+	assert.Equal(t, "w0:p2", val(t, tokens, "run_owner"))
+	assert.Len(t, val(t, tokens, "run_repo"), 80)
+	assert.Equal(t, strings.ToLower(longRepo[:80]), val(t, tokens, "run_repo"))
+	assert.True(t, slices.Contains(paneTokenNames(), "run_state"))
 }

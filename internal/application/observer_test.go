@@ -575,3 +575,74 @@ func TestGoingToAFoldLineOpensItForTheVisit(t *testing.T) {
 	assert.False(t, folded, "again: unfolded for good")
 	assert.Empty(t, folds.keys)
 }
+
+type fakeRunLedger struct {
+	records []ports.RunRecord
+	err     error
+	calls   int
+}
+
+func (l *fakeRunLedger) List(context.Context) ([]ports.RunRecord, error) {
+	l.calls++
+	if l.err != nil {
+		return nil, l.err
+	}
+	return append([]ports.RunRecord(nil), l.records...), nil
+}
+
+func TestObserverRunLedgerLifecycle(t *testing.T) {
+	agent := agentAt("a1", "w1:p1", domain.StatusIdle)
+	f := newFixture(agent)
+	ledger := &fakeRunLedger{
+		records: []ports.RunRecord{{
+			RunID:      "run-1",
+			WorkerName: "worker-1",
+			State:      "running",
+			TerminalID: string(agent.Terminal),
+		}},
+	}
+	settings := ports.DefaultSettings()
+	settings.Policy.IdleGrace = 0
+	f.observer = NewObserver(ObserverDeps{
+		Agents: f.herdr, Session: f.herdr, Activity: f.activity, State: f.state,
+		Sidebar: f.sidebar, Host: fakeHost{grouped: true}, RunLedger: ledger, Clock: f.clock, Logger: nopLogger{},
+	}, settings, domain.SortTriage, nil)
+
+	// Empty RunRoot skips RunLedger and leaves Run nil.
+	frame(t, f)
+	assert.Zero(t, ledger.calls)
+	assert.Nil(t, f.sidebar.last().Groups[0].Rows[0].Run)
+
+	// Setting RunRoot reads RunLedger and populates SidebarRow.Run.
+	settings.RunRoot = "/tmp/runs"
+	f.observer.UpdateSettings(settings)
+	f.clock.advance(time.Second)
+	frame(t, f)
+	assert.Equal(t, 1, ledger.calls)
+	require.NotNil(t, f.sidebar.last().Groups[0].Rows[0].Run)
+	assert.Equal(t, "run-1", f.sidebar.last().Groups[0].Rows[0].Run.RunID)
+	assert.Equal(t, "running", f.sidebar.last().Groups[0].Rows[0].Run.State)
+
+	// Run changes trigger a rebuild on the next refresh.
+	ledger.records[0].SignalStatus = "failed"
+	ledger.records[0].SignalReceivedAt = f.clock.Now()
+	f.clock.advance(time.Second)
+	frame(t, f)
+	assert.True(t, projected(t, f))
+	assert.Equal(t, "failed", f.sidebar.last().Groups[0].Rows[0].Run.SignalStatus)
+
+	// A RunLedger read error preserves previous matched runs.
+	ledger.err = errDown
+	f.clock.advance(time.Second)
+	frame(t, f)
+	require.NotNil(t, f.sidebar.last().Groups[0].Rows[0].Run)
+	assert.Equal(t, "run-1", f.sidebar.last().Groups[0].Rows[0].Run.RunID)
+
+	// Clearing RunRoot via UpdateSettings clears runs immediately.
+	ledger.err = nil
+	settings.RunRoot = ""
+	f.observer.UpdateSettings(settings)
+	f.clock.advance(time.Second)
+	frame(t, f)
+	assert.Nil(t, f.sidebar.last().Groups[0].Rows[0].Run)
+}

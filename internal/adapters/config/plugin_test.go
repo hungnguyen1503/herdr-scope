@@ -367,3 +367,39 @@ func TestFieldsRoundTrip(t *testing.T) {
 	assert.Equal(t, "#232636", f.Default(s))
 	assert.Equal(t, "U+F418", Codepoint("\uF418"))
 }
+
+func TestRunRootAndRunLineParseSaveRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s, warnings := Parse("run_root = \"/tmp/bunny-runs\"\nrun_line = \"on\"\n")
+	assert.Empty(t, warnings)
+	assert.Equal(t, "/tmp/bunny-runs", s.RunRoot)
+	assert.Equal(t, ports.RunLineOn, s.Presentation.RunLine)
+
+	bad, warnings := Parse("run_line = \"always\"\n")
+	assert.Equal(t, ports.RunLineOff, bad.Presentation.RunLine)
+	assert.Equal(t, []string{`run_line must be off or on, not "always"; using the default`}, warnings)
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	file := NewPluginFile(path, plainWrite)
+	require.NoError(t, file.Save(ctx, s))
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), `run_root = "/tmp/bunny-runs"`)
+	assert.Contains(t, string(raw), `run_line = "on"`)
+
+	reloaded, warnings, err := file.Load(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, warnings)
+	assert.Equal(t, s, reloaded)
+
+	// Saving defaults updates the existing lines so reloading returns defaults.
+	require.NoError(t, file.Save(ctx, ports.DefaultSettings()))
+	raw, err = os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), `run_root = ""`)
+	assert.Contains(t, string(raw), `run_line = "off"`)
+	reloaded, warnings, err = file.Load(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, warnings)
+	assert.Equal(t, ports.DefaultSettings(), reloaded)
+}

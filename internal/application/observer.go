@@ -27,8 +27,8 @@ const (
 	recordMaxAge = 30 * 24 * time.Hour
 )
 
-// ObserverDeps are the observer's ports. Activity, Repositories, Mover and
-// Folds may be nil.
+// ObserverDeps are the observer's ports. Activity, Repositories, Mover, Folds
+// and RunLedger may be nil.
 type ObserverDeps struct {
 	Agents       ports.AgentSource
 	Session      ports.SessionSource
@@ -39,6 +39,7 @@ type ObserverDeps struct {
 	Host         ports.HostConfig
 	Mover        ports.WorkspaceMover
 	Folds        ports.FoldStore
+	RunLedger    ports.RunLedger
 	Clock        ports.Clock
 	Logger       ports.Logger
 }
@@ -68,6 +69,7 @@ type Observer struct {
 	needSession bool
 	needAgents  bool
 	repoCache   map[string]repoLookup
+	runs        map[domain.PaneID]domain.RunMeta
 	view        domain.SidebarView
 
 	// stale is set by whatever the projection reads — the model, settings,
@@ -135,6 +137,9 @@ func (o *Observer) Settings() ports.Settings { return o.settings }
 // UpdateSettings swaps the settings in force; the next frame applies them.
 func (o *Observer) UpdateSettings(settings ports.Settings) {
 	o.settings = settings
+	if settings.RunRoot == "" {
+		o.runs = nil
+	}
 	o.needAgents = true
 	o.resolveTree()
 	o.stale = true
@@ -336,6 +341,7 @@ func (o *Observer) project(ctx context.Context, now time.Time, grouped bool) {
 		At: now, Mode: o.mode, HostGrouped: grouped, Policy: o.settings.Policy,
 		Workspaces: o.session.Workspaces, Tabs: o.session.Tabs, Home: o.session.Home, Agents: observed,
 		Folded: o.folded(), Focused: o.focused, Opened: o.opened, Tree: &o.tree,
+		Runs: o.runs, RunRootSet: o.settings.RunRoot != "",
 	})
 	o.stale, o.projectedAt, o.grouped, o.due = false, now, grouped, time.Time{}
 	if len(deadlines) > 0 {
@@ -344,13 +350,38 @@ func (o *Observer) project(ctx context.Context, now time.Time, grouped bool) {
 }
 
 func (o *Observer) refresh(ctx context.Context, now time.Time) error {
-	if o.needSession || !now.Before(o.sessionAt.Add(o.settings.Observer.ReconcileInterval)) {
-		return o.ReconcileAgents(ctx)
+	var err error
+	switch {
+	case o.needSession || !now.Before(o.sessionAt.Add(o.settings.Observer.ReconcileInterval)):
+		err = o.ReconcileAgents(ctx)
+	case o.needAgents || !now.Before(o.agentsAt.Add(o.settings.Observer.Heartbeat)):
+		err = o.ObserveAgents(ctx)
 	}
-	if o.needAgents || !now.Before(o.agentsAt.Add(o.settings.Observer.Heartbeat)) {
-		return o.ObserveAgents(ctx)
+	if err != nil {
+		return err
 	}
+	o.refreshRuns(ctx)
 	return nil
+}
+
+func (o *Observer) refreshRuns(ctx context.Context) {
+	if o.settings.RunRoot == "" || o.deps.RunLedger == nil {
+		if len(o.runs) > 0 {
+			o.runs = nil
+			o.stale = true
+		}
+		return
+	}
+	records, err := o.deps.RunLedger.List(ctx)
+	if err != nil {
+		o.deps.Logger.Debug("run ledger read failed", "error", err)
+		return
+	}
+	next := ports.MatchRuns(o.session.Agents, records)
+	if !maps.Equal(next, o.runs) {
+		o.runs = next
+		o.stale = true
+	}
 }
 
 func (o *Observer) recover(ctx context.Context, session *domain.AgentSession, agent domain.Agent) {

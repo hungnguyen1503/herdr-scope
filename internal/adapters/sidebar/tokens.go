@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kriuchkov/herdr-scope/internal/domain"
@@ -36,9 +37,15 @@ const (
 	tokenFold           = "fold"
 	tokenFoldCount      = "fold_count"
 	// tokenFolded marks a row a fold hides; the panel's filter drops it.
-	tokenFolded = "folded"
-	statePrefix = "state_"
-	titlePrefix = "title_"
+	tokenFolded     = "folded"
+	tokenRunState   = "run_state"
+	tokenRunSignal  = "run_signal"
+	tokenRunAge     = "run_age"
+	tokenRunMachine = "run_machine"
+	tokenRunOwner   = "run_owner"
+	tokenRunRepo    = "run_repo"
+	statePrefix     = "state_"
+	titlePrefix     = "title_"
 )
 
 // foldMark leads a folded family's line, as Herdr's own folded worktree
@@ -65,6 +72,7 @@ func paneTokenNames() []string {
 		tokenGroup, tokenGroupStale, tokenGroupParent, tokenGap,
 		tokenSortKey, tokenWsKey, tokenTabKey,
 		tokenFold, tokenFoldCount, tokenFolded,
+		tokenRunState, tokenRunSignal, tokenRunAge, tokenRunMachine, tokenRunOwner, tokenRunRepo,
 	}
 	for _, state := range domain.DisplayStates() {
 		names = append(names, statePrefix+string(state), titlePrefix+string(state))
@@ -127,6 +135,11 @@ type Presentation struct {
 	LogoColor ports.LogoColor
 	// ShowAge is which rows put their age in front of their title.
 	ShowAge ports.AgeMode
+	// RunLine prepends run-ledger cells to agent rows when run_root is set.
+	RunLine bool
+	// Logger logs a one-time warning when run_line exceeds Herdr's 16-token row limit.
+	Logger      ports.Logger
+	runLineOnce *sync.Once
 	// tables is shared by every copy and never written after NewPresentation.
 	tables *tokenTables
 }
@@ -141,6 +154,8 @@ func NewPresentation(settings ports.Settings, fontAvailable func() bool) Present
 		SpaceMark:    settings.Presentation.SpaceMark,
 		LogoColor:    settings.Presentation.LogoColor,
 		ShowAge:      settings.Presentation.ShowAge,
+		RunLine:      settings.RunRoot != "" && settings.Presentation.RunLine == ports.RunLineOn,
+		runLineOnce:  &sync.Once{},
 		tables:       newTokenTables(),
 	}
 	p.Glyphs.blankRest = p.compact()
@@ -217,7 +232,48 @@ func (p Presentation) rowTokens(row domain.SidebarRow, step int64, now time.Time
 	tokens.set(tokenSortKey, row.Keys.Pane)
 	tokens.set(tokenWsKey, row.Keys.Workspace)
 	tokens.set(tokenTabKey, row.Keys.Tab)
+	if row.Run != nil {
+		tokens.set(tokenRunState, normalizeRunToken(row.Run.State))
+		tokens.set(tokenRunSignal, normalizeRunToken(row.Run.SignalStatus))
+		tokens.set(tokenRunAge, normalizeRunToken(RunAge(now, row.Run)))
+		tokens.set(tokenRunMachine, normalizeRunToken(row.Run.Machine))
+		tokens.set(tokenRunOwner, normalizeRunToken(row.Run.OwnerPane))
+		tokens.set(tokenRunRepo, normalizeRunToken(row.Run.RepoID))
+	}
 	return tokens
+}
+
+// normalizeRunToken keeps printable ASCII bytes lowercased and bounded to
+// Herdr's 80-character token limit.
+func normalizeRunToken(s string) string {
+	s = strings.TrimSpace(s)
+	var b strings.Builder
+	for i := 0; i < len(s) && b.Len() < maxValueLen; i++ {
+		c := s[i]
+		if c < 0x20 || c >= 0x7f {
+			continue
+		}
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		b.WriteByte(c)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// RunAge formats how long the run's current step (or signal) has been open.
+func RunAge(now time.Time, run *domain.RunMeta) string {
+	if run == nil {
+		return ""
+	}
+	ts := run.StepStartedAt
+	if ts.IsZero() {
+		ts = run.SignalReceivedAt
+	}
+	if ts.IsZero() {
+		return ""
+	}
+	return cmp.Or(Age(now, ts), "0m")
 }
 
 // blankLine takes a row's drawn line off it, leaving the unrendered state

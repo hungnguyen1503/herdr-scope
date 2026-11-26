@@ -134,6 +134,9 @@ func ParseLayout(text string, layout ports.Layout) (ports.Settings, []string) {
 	}
 	s.FollowAppearance = p.boolean("follow_appearance", false)
 	s.ReorderWorkspaces = p.boolean("reorder_workspaces", false)
+	if v, ok := p.str("run_root"); ok {
+		s.RunRoot = v
+	}
 	if v, ok := p.str("log_level"); ok {
 		s.LogLevel = v
 	}
@@ -218,6 +221,7 @@ func (p *parser) settle(s *ports.Settings) {
 		func(to *ports.Settings, from ports.Settings) { to.Presentation.SpaceMark = from.Presentation.SpaceMark },
 		func(to *ports.Settings, from ports.Settings) { to.Presentation.LogoColor = from.Presentation.LogoColor },
 		func(to *ports.Settings, from ports.Settings) { to.Presentation.ShowAge = from.Presentation.ShowAge },
+		func(to *ports.Settings, from ports.Settings) { to.Presentation.RunLine = from.Presentation.RunLine },
 		func(to *ports.Settings, from ports.Settings) {
 			to.Presentation.ActiveRowBgLight = from.Presentation.ActiveRowBgLight
 		},
@@ -343,6 +347,9 @@ func (p *parser) presentation(pres *ports.PresentationSettings) {
 		pres.LogoColor = ports.LogoColor(v)
 	}
 	pres.ShowAge = p.ageMode(pres.ShowAge)
+	if v, ok := p.str("run_line"); ok {
+		pres.RunLine = ports.RunLineMode(v)
+	}
 	colors := table(p.raw, tableColors)
 	for key, target := range map[string]*ports.ColorOverride{
 		"active_row_bg_light": &pres.ActiveRowBgLight,

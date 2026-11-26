@@ -42,3 +42,21 @@ func TestColorOverrides(t *testing.T) {
 		assert.NoError(t, s.Validate(), value)
 	}
 }
+
+func TestRunLedgerSettingsDefaultsAndValidation(t *testing.T) {
+	def := DefaultSettings()
+	assert.Empty(t, def.RunRoot)
+	assert.Equal(t, RunLineOff, def.Presentation.RunLine)
+
+	for _, valid := range []RunLineMode{RunLineOff, RunLineOn} {
+		s := DefaultSettings()
+		s.Presentation.RunLine = valid
+		assert.NoError(t, s.Validate(), valid)
+	}
+
+	s := DefaultSettings()
+	s.Presentation.RunLine = "always"
+	err := s.Validate()
+	require.ErrorIs(t, err, ErrInvalidSettings)
+	assert.Contains(t, err.Error(), "run_line")
+}

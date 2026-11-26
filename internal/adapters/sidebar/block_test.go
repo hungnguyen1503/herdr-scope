@@ -137,3 +137,50 @@ func TestNormalizeMatchesHerdr(t *testing.T) {
 	v, _ = Normalize(strings.Repeat("a", 100))
 	assert.Len(t, v, 80)
 }
+
+type blockSpyLogger struct {
+	warns []string
+}
+
+func (l *blockSpyLogger) Debug(string, ...any)      {}
+func (l *blockSpyLogger) Info(string, ...any)       {}
+func (l *blockSpyLogger) Warn(msg string, _ ...any) { l.warns = append(l.warns, msg) }
+func (l *blockSpyLogger) Error(string, ...any)      {}
+
+func TestRunLinePrependsInCompactSkipsAndLogsOnceInClassicAndOffIsIdentical(t *testing.T) {
+	baseSettings := ports.DefaultSettings()
+	baseSettings.Presentation.Variant = ports.VariantText
+	baseSettings.Presentation.Layout = ports.LayoutCompact
+	offWithoutRoot, err := NewLayout(NewPresentation(baseSettings, nil), ports.AppearanceDark, []domain.AgentKind{"claude"})
+	require.NoError(t, err)
+
+	withRootOff := baseSettings
+	withRootOff.RunRoot = "/tmp/runs"
+	withRootOff.Presentation.RunLine = ports.RunLineOff
+	offWithRoot, err := NewLayout(NewPresentation(withRootOff, nil), ports.AppearanceDark, []domain.AgentKind{"claude"})
+	require.NoError(t, err)
+	assert.Equal(t, offWithoutRoot.TOML(), offWithRoot.TOML(), "run_line=off keeps TOML byte-identical even with run_root set")
+
+	compactOn := withRootOff
+	compactOn.Presentation.RunLine = ports.RunLineOn
+	compactLayout, err := NewLayout(NewPresentation(compactOn, nil), ports.AppearanceDark, []domain.AgentKind{"claude"})
+	require.NoError(t, err)
+	assert.Contains(t, compactLayout.TOML(), RunLineTag)
+	assert.Len(t, compactLayout.Agents[2], 10)
+	assert.Equal(t, "$run_state", compactLayout.Agents[2][0].Token)
+	assert.Equal(t, "$run_signal", compactLayout.Agents[2][1].Token)
+	assert.Equal(t, "$run_age", compactLayout.Agents[2][2].Token)
+	assert.Equal(t, "$title_working", compactLayout.Agents[2][3].Token)
+
+	// Classic row already has 14 cells; prepending 3 run cells (17 > 16) keeps old row and warns once.
+	classicOn := compactOn
+	classicOn.Presentation.Layout = ports.LayoutClassic
+	p := NewPresentation(classicOn, nil)
+	logger := &blockSpyLogger{}
+	p.Logger = logger
+	classicLayout, err := NewLayout(p, ports.AppearanceDark, []domain.AgentKind{"claude", "gemini"})
+	require.NoError(t, err)
+	assert.Len(t, classicLayout.Agents[2], 14)
+	assert.Equal(t, "$split_mark", classicLayout.Agents[2][0].Token)
+	assert.Len(t, logger.warns, 1, "row-limit warning is logged at most once across agent rows")
+}

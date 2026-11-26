@@ -207,6 +207,86 @@ type Clock interface {
 	Now() time.Time
 }
 
+// RunRecord is one worker run from the Bunny orchestration run ledger.
+type RunRecord struct {
+	RunID            string
+	WorkerName       string
+	RepoID           string
+	Machine          string
+	Runtime          string
+	State            string
+	SignalStatus     string
+	SignalSummary    string
+	SignalReceivedAt time.Time
+	StepStartedAt    time.Time
+	OwnerPane        string
+	PaneID           string
+	TerminalID       string
+	WaveTimestamp    time.Time
+}
+
+// Meta converts a RunRecord into domain.RunMeta for pure projection.
+func (r RunRecord) Meta() domain.RunMeta {
+	return domain.RunMeta{
+		RunID:            r.RunID,
+		WorkerName:       r.WorkerName,
+		RepoID:           r.RepoID,
+		Machine:          r.Machine,
+		Runtime:          r.Runtime,
+		State:            r.State,
+		SignalStatus:     r.SignalStatus,
+		SignalSummary:    r.SignalSummary,
+		SignalReceivedAt: r.SignalReceivedAt,
+		StepStartedAt:    r.StepStartedAt,
+		OwnerPane:        r.OwnerPane,
+	}
+}
+
+// RunLedger reads Bunny orchestration run records.
+type RunLedger interface {
+	List(ctx context.Context) ([]RunRecord, error)
+}
+
+// MatchRuns pairs live agents with run records, preferring terminal ID over
+// pane ID. Records must be ordered newest first so the newest match wins.
+func MatchRuns(agents []domain.Agent, records []RunRecord) map[domain.PaneID]domain.RunMeta {
+	if len(agents) == 0 || len(records) == 0 {
+		return nil
+	}
+	byTerm := make(map[string]RunRecord, len(records))
+	byPane := make(map[string]RunRecord, len(records))
+	for _, rec := range records {
+		if rec.TerminalID != "" {
+			if _, ok := byTerm[rec.TerminalID]; !ok {
+				byTerm[rec.TerminalID] = rec
+			}
+		}
+		if rec.PaneID != "" {
+			if _, ok := byPane[rec.PaneID]; !ok {
+				byPane[rec.PaneID] = rec
+			}
+		}
+	}
+	out := map[domain.PaneID]domain.RunMeta{}
+	for _, agent := range agents {
+		if agent.Terminal != "" {
+			if rec, ok := byTerm[string(agent.Terminal)]; ok {
+				out[agent.Pane] = rec.Meta()
+				continue
+			}
+		}
+		if agent.Pane != "" {
+			if rec, ok := byPane[string(agent.Pane)]; ok {
+				out[agent.Pane] = rec.Meta()
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // Logger is structured logging. *slog.Logger satisfies it.
 type Logger interface {
 	Debug(msg string, args ...any)

@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,12 +10,16 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/kriuchkov/herdr-scope/internal/adapters/config"
 	"github.com/kriuchkov/herdr-scope/internal/adapters/control"
 	"github.com/kriuchkov/herdr-scope/internal/adapters/filesystem"
+	"github.com/kriuchkov/herdr-scope/internal/adapters/runledger"
+	"github.com/kriuchkov/herdr-scope/internal/adapters/sidebar"
 	"github.com/kriuchkov/herdr-scope/internal/adapters/tui"
 	"github.com/kriuchkov/herdr-scope/internal/application"
 	"github.com/kriuchkov/herdr-scope/internal/domain"
@@ -101,6 +106,7 @@ func NewRootCommand(ctx context.Context, build Build, stdout, stderr io.Writer) 
 		fontCommand(runtime),
 		setupCommand(runtime),
 		themeSyncCommand(runtime),
+		runsCommand(runtime),
 		renderCommand(),
 	)
 	return root
@@ -574,4 +580,61 @@ func statusCommand(runtime func() *Runtime) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
 	return cmd
+}
+
+func runsCommand(runtime func() *Runtime) *cobra.Command {
+	var runRoot string
+	cmd := &cobra.Command{
+		Use:   "runs",
+		Short: "Print Bunny run-ledger entries joined with live Herdr panes",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			rt := runtime()
+			root := cmp.Or(runRoot, rt.Settings().RunRoot)
+			if root == "" {
+				fmt.Fprintln(cmd.OutOrStdout(), "run_root is not configured (set run_root or pass --run-root)")
+				return nil
+			}
+			records, err := runledger.New(root, rt.Logger, time.Now).List(cmd.Context())
+			if err != nil {
+				return fmt.Errorf("read run ledger: %w", err)
+			}
+			agents, err := rt.Observer.ListAgents(cmd.Context())
+			if err != nil {
+				// Herdr may not be running when checking run files manually; show unmatched runs instead.
+				rt.Logger.DebugContext(cmd.Context(), "herdr unavailable for runs join", "error", err)
+				agents = nil
+			}
+			return writeRunsTable(cmd.OutOrStdout(), time.Now(), records, agents)
+		},
+	}
+	cmd.Flags().StringVar(&runRoot, "run-root", "", "run-ledger directory to read (default: run_root setting)")
+	return cmd
+}
+
+func writeRunsTable(out io.Writer, now time.Time, records []ports.RunRecord, agents []domain.Agent) error {
+	matched := ports.MatchRuns(agents, records)
+	paneByRun := make(map[string]domain.PaneID, len(matched))
+	for _, a := range agents {
+		if meta, ok := matched[a.Pane]; ok {
+			if _, seen := paneByRun[meta.RunID]; !seen {
+				paneByRun[meta.RunID] = a.Pane
+			}
+		}
+	}
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "RUN ID\tWORKER\tSTATE\tSIGNAL\tAGE\tPANE")
+	for _, rec := range records {
+		meta := rec.Meta()
+		fmt.Fprintf(
+			w,
+			"%s\t%s\t%s\t%s\t%s\t%s\n",
+			rec.RunID,
+			cmp.Or(rec.WorkerName, "-"),
+			cmp.Or(rec.State, "-"),
+			cmp.Or(rec.SignalStatus, "-"),
+			cmp.Or(sidebar.RunAge(now, &meta), "-"),
+			cmp.Or(string(paneByRun[rec.RunID]), "-"),
+		)
+	}
+	return w.Flush() //nolint:wrapcheck // stdout
 }

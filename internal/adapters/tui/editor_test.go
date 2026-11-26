@@ -572,3 +572,37 @@ func TestRunNeedsATerminal(t *testing.T) {
 	err = Run(t.Context(), r, w, newFakeBackend().deps())
 	require.ErrorContains(t, err, "needs a terminal")
 }
+
+func TestEditPathRunRootAndCycleRunLine(t *testing.T) {
+	b := newFakeBackend()
+	e := newTestEditor(t, b)
+	goTo(t, e, "run_root")
+	assert.Contains(t, e.Render(84, 40), sgrDim+"none  (default)"+sgrReset)
+
+	press(t, e, "\r")
+	require.True(t, e.editing)
+	typeText(t, e, "  /tmp/bunny-runs  ")
+	press(t, e, "\r")
+	assert.False(t, e.editing)
+	assert.Equal(t, "/tmp/bunny-runs", value(t, e, "run_root"))
+	assert.True(t, e.dirty())
+
+	goTo(t, e, "run_line")
+	assert.Equal(t, "off", value(t, e, "run_line"))
+	press(t, e, "\x1b[C")
+	assert.Equal(t, "on", value(t, e, "run_line"))
+	press(t, e, "\x1b[D")
+	assert.Equal(t, "off", value(t, e, "run_line"))
+	press(t, e, "\r")
+	assert.Equal(t, "on", value(t, e, "run_line"))
+
+	press(t, e, "s")
+	require.Len(t, b.requests, 1)
+	assert.Equal(t, "/tmp/bunny-runs", b.requests[0].Settings.RunRoot)
+	assert.Equal(t, ports.RunLineOn, b.requests[0].Settings.Presentation.RunLine)
+
+	goTo(t, e, "run_root")
+	press(t, e, "r")
+	assert.Empty(t, value(t, e, "run_root"))
+	assert.True(t, e.dirty())
+}

@@ -44,7 +44,14 @@ func minuteKey(activity Activity) string {
 // triageKey encodes who needs the engineer first (rank descending) and, within
 // a rank, longest wait first by inverting the minute stamp against maxMinute
 // (earliest Since -> largest string); unknown waits sort last in the rank.
-func triageKey(display DisplayState, since time.Time) string {
+func triageKey(display DisplayState, since time.Time, run *RunMeta, runRootSet bool) string {
+	if since.IsZero() && runRootSet && run != nil {
+		if !run.SignalReceivedAt.IsZero() {
+			since = run.SignalReceivedAt
+		} else if !run.StepStartedAt.IsZero() {
+			since = run.StepStartedAt
+		}
+	}
 	wait := noStamp
 	if !since.IsZero() {
 		m := since.UnixMilli() / int64(time.Minute/time.Millisecond)
@@ -55,10 +62,18 @@ func triageKey(display DisplayState, since time.Time) string {
 		}
 		wait = key
 	}
-	return triageRank(display) + "-" + wait
+	return triageRank(display, run, runRootSet) + "-" + wait
 }
 
-func triageRank(display DisplayState) string {
+func triageRank(display DisplayState, run *RunMeta, runRootSet bool) string {
+	if runRootSet && run != nil {
+		if run.SignalStatus == "failed" || run.SignalStatus == "blocked" {
+			return "8"
+		}
+		if run.State == "awaiting-review" {
+			return "6"
+		}
+	}
 	switch display {
 	case DisplayBlocked:
 		return "7"
@@ -92,6 +107,7 @@ type orderEntry struct {
 	activity Activity
 	display  DisplayState
 	since    time.Time
+	run      *RunMeta
 }
 
 // ranking is everything ordering knows about one snapshot.
@@ -140,7 +156,7 @@ func (r ranking) family(ws WorkspaceID) WorkspaceID {
 // contiguous, parent first. When the parent runs no agent the members still
 // stay together, under a synthesised parent row (orphanRepo: the folder's
 // name, or the repository's).
-func rank(entries []orderEntry, tree WorktreeTree, mode SortMode) ranking {
+func rank(entries []orderEntry, tree WorktreeTree, mode SortMode, runRootSet bool) ranking {
 	r := ranking{
 		pane: make(map[PaneID]string, len(entries)), workspace: map[WorkspaceID]string{},
 		tab: make(map[PaneID]string, len(entries)), parentOf: map[WorkspaceID]WorkspaceID{},
@@ -154,7 +170,7 @@ func rank(entries []orderEntry, tree WorktreeTree, mode SortMode) ranking {
 	for i, e := range entries {
 		key := minuteKey(e.activity)
 		if mode == SortTriage {
-			key = triageKey(e.display, e.since)
+			key = triageKey(e.display, e.since, e.run, runRootSet)
 		}
 		keys[i] = key
 		r.pane[e.agent.Pane] = key

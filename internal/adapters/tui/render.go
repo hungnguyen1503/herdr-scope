@@ -188,6 +188,10 @@ func showValue(f config.Field, value string) string {
 		if value == "" {
 			return sgrDim + "theme's own" + sgrReset
 		}
+	case config.KindPath:
+		if value == "" {
+			return sgrDim + "none" + sgrReset
+		}
 	case config.KindEnum, config.KindNumber:
 	}
 	return value

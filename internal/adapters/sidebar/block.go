@@ -20,6 +20,8 @@ const (
 	VariantTag = "# logo glyphs: "
 	// LayoutTag records the layout the rows were written for.
 	LayoutTag = "# layout: "
+	// RunLineTag records when run_line cells are enabled in the sidebar block.
+	RunLineTag = "# run_line: on"
 )
 
 // Rule colours a cell whose value contains a string, or starts with one.
@@ -46,6 +48,7 @@ type Cell struct {
 type Layout struct {
 	Variant ports.Variant
 	Kind    ports.Layout
+	RunLine bool
 	Agents  [][]Cell
 	ByAgent []AgentRows
 	Spaces  [][]Cell
@@ -110,6 +113,18 @@ func agentRows(kind domain.AgentKind, p Presentation, appearance ports.Appearanc
 			cell("$logo_unknown", c.Unknown, false),
 		}, titles...)
 	}
+	if p.RunLine {
+		runCells := []Cell{
+			cell("$run_state", c.Subtle, false),
+			cell("$run_signal", c.Subtle, false),
+			cell("$run_age", c.IdleStale, false),
+		}
+		if len(runCells)+len(line) <= rowTokenLimit {
+			line = append(runCells, line...)
+		} else {
+			p.warnRunLineOverflow(len(runCells) + len(line))
+		}
+	}
 	return [][]Cell{
 		// A synthesised parent for a worktree whose checkout runs no agent, or
 		// a folded family's line, which stands in for it.
@@ -119,6 +134,20 @@ func agentRows(kind domain.AgentKind, p Presentation, appearance ports.Appearanc
 		line,
 		{{Token: "$gap", Bare: true}},
 	}
+}
+
+func (p Presentation) warnRunLineOverflow(would int) {
+	if p.Logger == nil {
+		return
+	}
+	log := func() {
+		p.Logger.Warn("run_line skipped: row would exceed Herdr token limit", "tokens", would, "limit", rowTokenLimit)
+	}
+	if p.runLineOnce != nil {
+		p.runLineOnce.Do(log)
+		return
+	}
+	log()
 }
 
 // foldLine is an entry's first line: the repository row, or a fold's mark
@@ -173,6 +202,7 @@ func NewLayout(p Presentation, appearance ports.Appearance, byAgent []domain.Age
 	layout := Layout{
 		Variant: p.Glyphs.Variant(),
 		Kind:    cmp.Or(p.Layout, ports.LayoutClassic),
+		RunLine: p.RunLine,
 		Agents:  agentRows("", p, appearance),
 		Spaces:  spaceRows(p, appearance),
 	}
@@ -239,10 +269,15 @@ func (l Layout) TOML() string {
 		"[ui.sidebar.agents]",
 		VariantTag + string(l.Variant),
 		LayoutTag + string(l.Kind),
-		"rows = " + inlineRows(l.Agents),
+	}
+	if l.RunLine {
+		lines = append(lines, RunLineTag)
+	}
+	lines = append(lines,
+		"rows = "+inlineRows(l.Agents),
 		"",
 		"[ui.sidebar.agents.rows_by_agent]",
-	}
+	)
 	for _, a := range l.ByAgent {
 		lines = append(lines, string(a.Kind)+" = "+inlineRows(a.Rows))
 	}

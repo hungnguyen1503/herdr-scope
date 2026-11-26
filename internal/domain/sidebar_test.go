@@ -593,3 +593,69 @@ func TestTriageOrderKeepsActiveGroupingWorktreesSplitsAndFolds(t *testing.T) {
 	assert.Equal(t, root.Keys.Tab, line.Keys.Tab)
 	assert.Greater(t, line.Keys.Pane, root.Keys.Pane)
 }
+
+func TestTriageOrderWithRunLedger(t *testing.T) {
+	now := at(0)
+	s := (&scenario{}).
+		ws("w-blocked-ui", "blocked-ui", nil).
+		ws("w-run-fail", "run-fail", nil).
+		ws("w-review", "review", nil).
+		ws("w-work", "work", nil).
+		agent("w-blocked-ui", "t1", "p1", 10, DisplayBlocked).
+		agent("w-run-fail", "t1", "p1", 5, DisplayIdle).
+		agent("w-review", "t1", "p1", 20, DisplayIdle).
+		agent("w-work", "t1", "p1", 1, DisplayWorking)
+	s.agents[0].Since = at(-10 * time.Minute)
+	s.agents[3].Since = at(-1 * time.Minute)
+
+	runs := map[PaneID]RunMeta{
+		"w-run-fail:p1": {
+			RunID:            "run-1",
+			State:            "failed",
+			SignalStatus:     "failed",
+			SignalReceivedAt: now.Add(-2 * time.Minute),
+		},
+		"w-review:p1": {
+			RunID:         "run-2",
+			State:         "awaiting-review",
+			StepStartedAt: now.Add(-15 * time.Minute),
+		},
+	}
+
+	buildWith := func(mode SortMode, runRootSet bool) SidebarView {
+		return BuildSidebar(SidebarInput{
+			At:         now,
+			Mode:       mode,
+			Policy:     DefaultDisplayPolicy(),
+			Workspaces: s.workspaces,
+			Agents:     s.agents,
+			Runs:       runs,
+			RunRootSet: runRootSet,
+		})
+	}
+
+	v := buildWith(SortTriage, true)
+	assert.Equal(t, []string{
+		"# run-fail", "0 w-run-fail:p1",
+		"# blocked-ui", "0 w-blocked-ui:p1",
+		"# review", "0 w-review:p1",
+		"# work", "0 w-work:p1",
+	}, outline(v))
+	require.NotNil(t, v.Groups[0].Rows[0].Run)
+	assert.Equal(t, "run-1", v.Groups[0].Rows[0].Run.RunID)
+
+	// When RunRootSet is false, Runs is completely ignored.
+	off := buildWith(SortTriage, false)
+	assert.Equal(t, []string{
+		"# blocked-ui", "0 w-blocked-ui:p1",
+		"# work", "0 w-work:p1",
+		"# run-fail", "0 w-run-fail:p1",
+		"# review", "0 w-review:p1",
+	}, outline(off))
+	assert.Nil(t, off.Groups[2].Rows[0].Run)
+
+	// Non-triage orders keep identical outlines regardless of RunRootSet.
+	for _, mode := range []SortMode{SortActive, SortRecent, SortHere, SortOff} {
+		assert.Equal(t, outline(buildWith(mode, false)), outline(buildWith(mode, true)), mode)
+	}
+}

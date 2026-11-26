@@ -72,6 +72,21 @@ type SidebarGroup struct {
 	Rows []SidebarRow
 }
 
+// RunMeta is the Bunny orchestration run matched to a live pane.
+type RunMeta struct {
+	RunID            string
+	WorkerName       string
+	RepoID           string
+	Machine          string
+	Runtime          string
+	State            string
+	SignalStatus     string
+	SignalSummary    string
+	SignalReceivedAt time.Time
+	StepStartedAt    time.Time
+	OwnerPane        string
+}
+
 // SidebarRow is one agent row.
 type SidebarRow struct {
 	Agent     AgentID
@@ -91,6 +106,8 @@ type SidebarRow struct {
 	// Fold is the line of a folded family drawn above this row; with
 	// Fold.Alone the row shows nothing else.
 	Fold *Fold
+	// Run is the matched Bunny run-ledger entry when run_root is configured.
+	Run *RunMeta
 }
 
 // SpaceView is the aggregated mark of one workspace.
@@ -145,6 +162,9 @@ type SidebarInput struct {
 	// Tree is ResolveTree(Workspaces, Policy.NestFolders, Home) when the
 	// caller keeps it between frames; nil resolves it here.
 	Tree *WorktreeTree
+	// Runs holds matched run-ledger metadata per pane when run_root is set.
+	Runs       map[PaneID]RunMeta
+	RunRootSet bool
 }
 
 // spacePriority is which agent a workspace's single mark speaks for: a
@@ -168,7 +188,14 @@ func BuildSidebar(in SidebarInput) SidebarView {
 	displays := make(map[PaneID]DisplayState, len(in.Agents))
 	since := make(map[PaneID]time.Time, len(in.Agents))
 	for i, a := range in.Agents {
-		entries[i] = orderEntry{agent: a.Agent, activity: a.Activity, display: a.Display, since: a.Since}
+		var run *RunMeta
+		if in.RunRootSet {
+			if r, ok := in.Runs[a.Agent.Pane]; ok {
+				copied := r
+				run = &copied
+			}
+		}
+		entries[i] = orderEntry{agent: a.Agent, activity: a.Activity, display: a.Display, since: a.Since, run: run}
 		displays[a.Agent.Pane] = a.Display
 		since[a.Agent.Pane] = a.Since
 	}
@@ -179,7 +206,7 @@ func BuildSidebar(in SidebarInput) SidebarView {
 	} else {
 		tree = ResolveTree(in.Workspaces, in.Policy.NestFolders, in.Home)
 	}
-	ranks := rank(entries, tree, in.Mode)
+	ranks := rank(entries, tree, in.Mode, in.RunRootSet)
 	grouped := in.Mode.Grouped(in.HostGrouped)
 	ordered := displayOrder(entries, in.Mode, ranks)
 	ranks = detachStrays(ordered, ranks)
@@ -318,7 +345,7 @@ func (b *rowBuilder) row(e orderEntry) SidebarRow {
 		Agent: a.ID, Pane: a.Pane, Tab: a.Tab, Workspace: a.Workspace, Kind: a.Kind,
 		Display: b.displays[a.Pane], Title: text.Title, TabLabel: text.TabLabel,
 		Depth: b.depth(a), Corner: b.corner(a), Keys: keys, Since: b.since[a.Pane],
-		Fold: b.carriers[a.Pane],
+		Fold: b.carriers[a.Pane], Run: e.run,
 	}
 }
 

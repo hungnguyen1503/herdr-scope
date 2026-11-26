@@ -154,7 +154,7 @@ func TestWriterSendsOnlyWhatChanged(t *testing.T) {
 	_, err := w.Apply(context.Background(), view(idleRow("a1", "w1:p1")))
 	require.NoError(t, err)
 	first := host.count("w1:p1")
-	assert.Equal(t, 2, first, "the first write is the whole set, in chunks of 16")
+	assert.Equal(t, 3, first, "the first write is the whole set, in chunks of 16")
 	assert.Equal(t, "task", host.store["w1:p1"]["title_idle"])
 
 	_, err = w.Apply(context.Background(), view(idleRow("a1", "w1:p1")))
@@ -292,6 +292,10 @@ func TestWriterClearKeepsTitlesUnlessPurged(t *testing.T) {
 	w := NewWriter(host, textPresentation(), (&clock{now: at0()}).Now)
 	row := idleRow("a1", "w1:p1")
 	row.Keys = domain.SortKeys{Pane: "000000000001", Workspace: "ws", Tab: "tab"}
+	row.Run = &domain.RunMeta{
+		State: "running", SignalStatus: "done", StepStartedAt: at0().Add(-5 * time.Minute),
+		Machine: "devbox", OwnerPane: "w0:p1", RepoID: "herdr-scope",
+	}
 	_, err := w.Apply(context.Background(), view(row))
 	require.NoError(t, err)
 
@@ -302,6 +306,9 @@ func TestWriterClearKeepsTitlesUnlessPurged(t *testing.T) {
 	assert.NotContains(t, tokens, "logo")
 	assert.NotContains(t, tokens, "group")
 	assert.NotContains(t, tokens, "tab_key")
+	for _, name := range []string{"run_state", "run_signal", "run_age", "run_machine", "run_owner", "run_repo"} {
+		assert.NotContains(t, tokens, name)
+	}
 	assert.Empty(t, host.store["ws:w1"])
 
 	require.NoError(t, w.Clear(context.Background(), true))

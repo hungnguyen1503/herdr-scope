@@ -20,6 +20,8 @@ type Settings struct {
 	FollowAppearance bool
 	// ReorderWorkspaces makes Herdr's workspace order follow Scope's.
 	ReorderWorkspaces bool
+	// RunRoot is an optional directory containing Bunny orchestration run JSON files.
+	RunRoot string
 	// LogLevel is debug, info, warn or error.
 	LogLevel string
 }
@@ -99,6 +101,15 @@ const (
 	AgeOff AgeMode = "off"
 )
 
+// RunLineMode controls whether run-ledger cells are prepended to sidebar rows.
+type RunLineMode string
+
+// Run line modes.
+const (
+	RunLineOff RunLineMode = "off"
+	RunLineOn  RunLineMode = "on"
+)
+
 // ColorOverride replaces one theme colour. Set with an empty Value means
 // "keep the theme's own"; unset means Scope's default.
 type ColorOverride struct {
@@ -125,6 +136,8 @@ type PresentationSettings struct {
 	// ShowAge is which rows put how long they have been in their state in
 	// front of their title.
 	ShowAge AgeMode
+	// RunLine prepends run-ledger cells to agent rows when run_root is set.
+	RunLine RunLineMode
 }
 
 // colorPattern accepts what Herdr's theme accepts:
@@ -178,6 +191,11 @@ func (s Settings) Validate() error {
 	default:
 		invalid("show_age must be waiting, all or off, not %q", s.Presentation.ShowAge)
 	}
+	switch s.Presentation.RunLine {
+	case RunLineOff, RunLineOn:
+	default:
+		invalid("run_line must be off or on, not %q", s.Presentation.RunLine)
+	}
 	for name, color := range map[string]ColorOverride{
 		"colors.active_row_bg_light": s.Presentation.ActiveRowBgLight,
 		"colors.active_row_bg_dark":  s.Presentation.ActiveRowBgDark,
@@ -226,9 +244,11 @@ func DefaultSettings() Settings {
 			SpaceMark:    SpaceMarkLogo,
 			LogoColor:    LogoColorActive,
 			ShowAge:      AgeWaiting,
+			RunLine:      RunLineOff,
 		},
 		FollowAppearance:  false,
 		ReorderWorkspaces: false,
+		RunRoot:           "",
 		LogLevel:          "info",
 	}
 }

@@ -192,7 +192,7 @@ func (e *editor) step(dir int) {
 		// Rounded to hundredths so half-steps do not drift into 2.9999999.
 		next := math.Round((n+float64(dir)*f.Step)*100) / 100
 		e.values[e.cursor] = config.FormatNumber(clamp(f, next))
-	case config.KindGlyph, config.KindColor:
+	case config.KindGlyph, config.KindColor, config.KindPath:
 		e.beginEdit()
 	}
 }
@@ -246,7 +246,7 @@ func (e *editor) commitEdit() {
 			return
 		}
 		e.values[e.cursor] = raw
-	case config.KindBool, config.KindEnum:
+	case config.KindBool, config.KindEnum, config.KindPath:
 		e.values[e.cursor] = raw
 	}
 }

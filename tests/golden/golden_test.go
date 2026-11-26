@@ -73,6 +73,30 @@ func TestGoldenAges(t *testing.T) {
 	}
 }
 
+// TestRunLineOffIsGoldenNeutral proves that setting run_root with run_line =
+// off leaves both rendered sidebar output and published tokens byte-identical.
+func TestRunLineOffIsGoldenNeutral(t *testing.T) {
+	file := filepath.Join(root(t), "fixtures", "scenarios", "scenario-01.json")
+	runDir := t.TempDir()
+	for layout, infix := range map[ports.Layout]string{ports.LayoutCompact: "", ports.LayoutClassic: ".classic"} {
+		name := "scenario-01" + infix
+		t.Run(name, func(t *testing.T) {
+			s, err := scenario.Load(file)
+			require.NoError(t, err)
+			s.Layout = layout
+			s.Config = "run_root = \"" + filepath.ToSlash(runDir) + "\"\nrun_line = \"off\"\n" + s.Config
+			result, err := scenario.Run(s)
+			require.NoError(t, err)
+			for suffix, opts := range map[string]sidebar.RenderOptions{".txt": {}, ".tokens.txt": {Annotate: true}} {
+				got := "# " + s.Description + "\n" + result.Render(opts)
+				want, readErr := os.ReadFile(filepath.Join(root(t), "golden", name+suffix))
+				require.NoError(t, readErr)
+				assert.Equal(t, string(want), got)
+			}
+		})
+	}
+}
+
 func testGolden(t *testing.T, s scenario.Scenario, layout ports.Layout, name string) {
 	t.Helper()
 	s.Layout = layout

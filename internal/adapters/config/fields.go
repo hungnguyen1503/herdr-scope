@@ -19,6 +19,7 @@ const (
 	KindNumber FieldKind = "number"
 	KindGlyph  FieldKind = "glyph"
 	KindColor  FieldKind = "color"
+	KindPath   FieldKind = "path"
 )
 
 // Field is one row of the settings popup and one key of the config file.
@@ -72,7 +73,7 @@ func (f Field) literal(value string) string {
 		if _, err := strconv.ParseFloat(value, 64); err == nil {
 			return value
 		}
-	case KindGlyph, KindColor:
+	case KindGlyph, KindColor, KindPath:
 	}
 	return tomlString(value)
 }
@@ -263,6 +264,17 @@ func Fields() []Field {
 			func(s ports.Settings) bool { return s.FollowAppearance },
 			func(s *ports.Settings, b bool) { s.FollowAppearance = b },
 		),
+		{
+			Key:  "run_root",
+			Kind: KindPath,
+			Help: "Directory of Bunny run-ledger JSON files to join with live panes. Empty disables the run ledger.",
+			Get:  func(s ports.Settings) string { return s.RunRoot },
+			Set: func(s ports.Settings, v string) (ports.Settings, error) {
+				s.RunRoot = v
+				return s, nil
+			},
+		},
+		runLineField(),
 		colorField("active_row_bg_light", "Selected-row fill written to [theme.custom] for a light theme. Empty = keep the theme's own.",
 			func(p *ports.PresentationSettings) *ports.ColorOverride { return &p.ActiveRowBgLight }, ports.AppearanceLight),
 		colorField("active_row_bg_dark", "Selected-row fill for a dark theme. Empty = keep the theme's own.",
@@ -334,6 +346,20 @@ func showAgeField() Field {
 		Get: func(s ports.Settings) string { return string(s.Presentation.ShowAge) },
 		Set: func(s ports.Settings, v string) (ports.Settings, error) {
 			s.Presentation.ShowAge = ports.AgeMode(v)
+			return s, nil
+		},
+	}
+}
+
+func runLineField() Field {
+	return Field{
+		Key:     "run_line",
+		Kind:    KindEnum,
+		Options: []string{string(ports.RunLineOff), string(ports.RunLineOn)},
+		Help:    "Prepend run-ledger cells (state, signal, age) to agent rows when run_root is set.",
+		Get:     func(s ports.Settings) string { return string(s.Presentation.RunLine) },
+		Set: func(s ports.Settings, v string) (ports.Settings, error) {
+			s.Presentation.RunLine = ports.RunLineMode(v)
 			return s, nil
 		},
 	}
