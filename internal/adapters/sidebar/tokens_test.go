@@ -599,7 +599,9 @@ func TestRunTokensPublishedNormalizedAndCleared(t *testing.T) {
 		Pane: "w1:p1", Workspace: "w1", Kind: "claude", Display: domain.DisplayIdle, Title: "task",
 	}, true)
 	tokens := p.PaneTokens(view, g, 0)
-	for _, name := range []string{"run_state", "run_signal", "run_age", "run_machine", "run_owner", "run_repo", "run_worker"} {
+	// run_worker is keyed by the workspace label, not by the run, so it is
+	// tested by name in TestRunWorkerNamesTheRow rather than claimed cleared here.
+	for _, name := range []string{"run_state", "run_signal", "run_age", "run_machine", "run_owner", "run_repo"} {
 		assert.Empty(t, val(t, tokens, name), "no run matched clears %s", name)
 	}
 
@@ -655,4 +657,15 @@ func TestRunWorkerNamesTheRow(t *testing.T) {
 		Title: "x", Label: "chief-2.Bug-Worker",
 	}, true)
 	assert.Equal(t, "bug-worker", val(t, p.PaneTokens(view, g, 0), "run_worker"), "the same normalisation as every run token")
+
+	// A row the ledger matched but the label never tagged still publishes
+	// nothing: the token follows the label, not the run.
+	view, g = rowView(domain.SidebarRow{
+		Pane: "w1:p1", Workspace: "w1", Kind: "claude", Display: domain.DisplayIdle,
+		Title: "x", Label: "bunny-chief-of-staff",
+		Run: &domain.RunMeta{State: "running", RepoID: "herdr-scope"},
+	}, true)
+	runTokens := p.PaneTokens(view, g, 0)
+	assert.Empty(t, val(t, runTokens, "run_worker"), "a matched run does not invent a worker")
+	assert.Equal(t, "herdr-scope", val(t, runTokens, "run_repo"), "the run tokens themselves do publish")
 }

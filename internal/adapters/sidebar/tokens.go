@@ -284,7 +284,9 @@ func RunAge(now time.Time, run *domain.RunMeta) string {
 }
 
 // blankLine takes a row's drawn line off it, leaving the unrendered state
-// mark: the row of a fold that hides it too shows the fold line alone.
+// mark: the row of a fold that hides it too shows the fold line alone. The
+// run_* tokens stay — the pane still belongs to that run and that worker, and
+// a fold row's cells never ask for them.
 func blankLine(tokens Tokens) {
 	for name := range tokens {
 		if strings.HasPrefix(name, titlePrefix) || strings.HasPrefix(name, tokenLogo) || name == tokenSplit {

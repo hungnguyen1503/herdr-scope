@@ -18,6 +18,27 @@ func tagGroups(v SidebarView) map[string]int {
 	return out
 }
 
+// TestWorkerNameSplitsOnTheLastDot pins the token's rule at the layer that
+// owns label parsing: the chief owns the header, so only the tail identifies
+// the row, and a tail that is the whole label identifies nothing.
+func TestWorkerNameSplitsOnTheLastDot(t *testing.T) {
+	for _, tc := range []struct {
+		label, want, why string
+	}{
+		{"c1.scope.triage-order", "triage-order", "the legacy three segments"},
+		{"c1.bug-worker", "bug-worker", "the two-segment form"},
+		{"bunny-chief-1.herdr-scope.bug-worker", "bug-worker", "a long chief does not shift the tail"},
+		{"c1.", "", "an empty tail names no worker"},
+		{"c1...", "", "the last of an empty segment is still empty"},
+		{"bunny-chief-of-staff", "", "no dot names no worker"},
+		{"", "", "an empty label names none"},
+		{".c1", "c1", "an empty chief still leaves a tail"},
+		{"a.b.c.d", "d", "only the last segment counts"},
+	} {
+		assert.Equal(t, tc.want, WorkerName(tc.label), "%q: %s", tc.label, tc.why)
+	}
+}
+
 // TestStablePutsOneHeaderOnATagWithUnrelatedWorkers is the reported bug: two
 // workers of one chief in different repositories, cut from nothing in common,
 // rendered as two chief-2 blocks because the run split on every workspace.
