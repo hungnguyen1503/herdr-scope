@@ -100,6 +100,10 @@ type SidebarRow struct {
 	Display   DisplayState
 	Title     string
 	TabLabel  string
+	// Label is the workspace's own label, uncut: the run tokens read the
+	// worker's name out of it, and a group header of a tag family holds the
+	// tag instead.
+	Label string
 	// Depth is the indent level, 0..3.
 	Depth  int
 	Corner Corner
@@ -367,6 +371,7 @@ func (b *rowBuilder) row(e orderEntry) SidebarRow {
 	return SidebarRow{
 		Agent: a.ID, Pane: a.Pane, Tab: a.Tab, Workspace: a.Workspace, Kind: a.Kind,
 		Display: b.displays[a.Pane], Title: text.Title, TabLabel: text.TabLabel,
+		Label: labelOf(b.labels, a.Workspace),
 		Depth: b.depth(a), Corner: b.corner(a), Keys: keys, Since: b.since[a.Pane],
 		Fold: b.carriers[a.Pane], Run: e.run,
 	}

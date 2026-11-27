@@ -306,7 +306,7 @@ func TestWriterClearKeepsTitlesUnlessPurged(t *testing.T) {
 	assert.NotContains(t, tokens, "logo")
 	assert.NotContains(t, tokens, "group")
 	assert.NotContains(t, tokens, "tab_key")
-	for _, name := range []string{"run_state", "run_signal", "run_age", "run_machine", "run_owner", "run_repo"} {
+	for _, name := range []string{"run_state", "run_signal", "run_age", "run_machine", "run_owner", "run_repo", "run_worker"} {
 		assert.NotContains(t, tokens, name)
 	}
 	assert.Empty(t, host.store["ws:w1"])

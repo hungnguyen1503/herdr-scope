@@ -35,6 +35,11 @@ daemon applies it at once. Hand edits are picked up within two seconds.
 | `colors.active_row_bg_light` | `#b9cdf2` | selected-row fill on a light theme; empty keeps the theme's |
 | `colors.active_row_bg_dark` | `#232636` | selected-row fill on a dark theme |
 
+Every row also carries `$run_worker`: the last dot-delimited segment of its
+workspace's label (`<chief>.<worker>`, and the older `<chief>.<repo>.<worker>`),
+lowercased. It is set whether or not a run matched, so a worker whose title is a
+shell prompt still says which worker it is; a label without a dot publishes nothing.
+
 A few keys live only in the file:
 
 ```toml

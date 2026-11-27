@@ -7,6 +7,19 @@ import "strings"
 // header shares a cell with the workspace name below it.
 const chiefTagMax = 16
 
+// WorkerName is the worker a workspace label names: the last dot-delimited
+// segment, so `<chief>.<worker>` and the legacy `<chief>.<repo>.<worker>` both
+// yield the bare worker and a published token need not know which form it read.
+// Empty when the label has no dot or names no worker: an untagged workspace
+// publishes nothing, and the row loses the cell instead of showing a whole label.
+func WorkerName(label string) string {
+	i := strings.LastIndexByte(label, '.')
+	if i < 0 {
+		return ""
+	}
+	return label[i+1:]
+}
+
 // ChiefTag is the group a workspace's label names. A worker workspace reads
 // `<chief>.<repo>.<worker>`; the first dot-delimited segment is the tag and
 // the rest of the label is opaque. Empty when the label has no dot or names

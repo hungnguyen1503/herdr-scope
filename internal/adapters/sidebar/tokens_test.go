@@ -336,14 +336,15 @@ func TestSpaceTokens(t *testing.T) {
 	tokens = p.SpaceTokens(domain.SpaceView{Mark: domain.DisplayIdleStale}, at0())
 	assert.Equal(t, "·", val(t, tokens, "space_idle"), "idle tiers share one cell")
 	assert.LessOrEqual(t, len(spaceTokenNames()), 32, "a workspace holds at most 32 tokens")
-	for _, name := range []string{"run_state", "run_signal", "run_age", "run_machine", "run_owner", "run_repo"} {
+	for _, name := range []string{"run_state", "run_signal", "run_age", "run_machine", "run_owner", "run_repo", "run_worker"} {
 		assert.Contains(t, paneTokenNames(), name)
 	}
 	popView, popGroup := rowView(domain.SidebarRow{
 		Pane: "w1:p1", Workspace: "w1", Kind: "claude", Display: domain.DisplayWorking, Title: "Ship it",
 		TabLabel: "tab", Depth: 1, Corner: domain.CornerTee,
-		Keys: domain.SortKeys{Pane: "1", Workspace: "2", Tab: "3"},
-		Fold: &domain.Fold{Root: "w1", Label: "app", Hidden: 1},
+		Label: "chief-2.herdr-scope.bug-worker",
+		Keys:  domain.SortKeys{Pane: "1", Workspace: "2", Tab: "3"},
+		Fold:  &domain.Fold{Root: "w1", Label: "app", Hidden: 1},
 		Run: &domain.RunMeta{
 			State: "running", SignalStatus: "done", StepStartedAt: at0().Add(-5 * time.Minute),
 			Machine: "devbox", OwnerPane: "w0:p1", RepoID: "herdr-scope",
@@ -352,11 +353,13 @@ func TestSpaceTokens(t *testing.T) {
 	popGroup.OrphanRepo = "app"
 	popView.Groups[0] = popGroup
 	setCount := 0
-	for _, v := range textPresentation().PaneTokens(popView, popGroup, 0) {
+	popTokens := textPresentation().PaneTokens(popView, popGroup, 0)
+	for _, v := range popTokens {
 		if v != nil {
 			setCount++
 		}
 	}
+	assert.Equal(t, "bug-worker", val(t, popTokens, "run_worker"), "the cap is measured with run_worker set")
 	assert.LessOrEqual(t, setCount, 32, "a populated pane sets at most 32 tokens")
 }
 
@@ -596,7 +599,7 @@ func TestRunTokensPublishedNormalizedAndCleared(t *testing.T) {
 		Pane: "w1:p1", Workspace: "w1", Kind: "claude", Display: domain.DisplayIdle, Title: "task",
 	}, true)
 	tokens := p.PaneTokens(view, g, 0)
-	for _, name := range []string{"run_state", "run_signal", "run_age", "run_machine", "run_owner", "run_repo"} {
+	for _, name := range []string{"run_state", "run_signal", "run_age", "run_machine", "run_owner", "run_repo", "run_worker"} {
 		assert.Empty(t, val(t, tokens, name), "no run matched clears %s", name)
 	}
 
@@ -621,4 +624,35 @@ func TestRunTokensPublishedNormalizedAndCleared(t *testing.T) {
 	assert.Len(t, val(t, tokens, "run_repo"), 80)
 	assert.Equal(t, strings.ToLower(longRepo[:80]), val(t, tokens, "run_repo"))
 	assert.True(t, slices.Contains(paneTokenNames(), "run_state"))
+	assert.True(t, slices.Contains(paneTokenNames(), "run_worker"))
+}
+
+// TestRunWorkerNamesTheRow pins the one thing a row says that its title
+// cannot: which worker it is. The tag owns the header, so the label's last
+// segment is what tells a chief's two workers apart.
+func TestRunWorkerNamesTheRow(t *testing.T) {
+	p := textPresentation()
+	for _, tc := range []struct {
+		name  string
+		label string
+		want  string
+	}{
+		{"two segments", "bug-fix.bug-worker", "bug-worker"},
+		{"legacy three segments", "bug-fix.herdr-scope.bug-worker", "bug-worker"},
+		{"no dot publishes nothing", "bunny-chief-of-staff", ""},
+		{"trailing dot publishes nothing", "bug-fix.", ""},
+		{"a whole label is not a worker", "plain", ""},
+	} {
+		view, g := rowView(domain.SidebarRow{
+			Pane: "w1:p1", Workspace: "w1", Kind: "claude", Display: domain.DisplayIdle,
+			Title: "~\\hungquangnguyen> powershell.exe", Label: tc.label,
+		}, true)
+		assert.Equal(t, tc.want, val(t, p.PaneTokens(view, g, 0), "run_worker"), tc.name)
+	}
+
+	view, g := rowView(domain.SidebarRow{
+		Pane: "w1:p1", Workspace: "w1", Kind: "claude", Display: domain.DisplayIdle,
+		Title: "x", Label: "chief-2.Bug-Worker",
+	}, true)
+	assert.Equal(t, "bug-worker", val(t, p.PaneTokens(view, g, 0), "run_worker"), "the same normalisation as every run token")
 }

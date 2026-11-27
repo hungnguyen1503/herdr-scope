@@ -44,8 +44,11 @@ const (
 	tokenRunMachine = "run_machine"
 	tokenRunOwner   = "run_owner"
 	tokenRunRepo    = "run_repo"
-	statePrefix     = "state_"
-	titlePrefix     = "title_"
+	// tokenRunWorker names the worker a row is: the tag owns the header, so
+	// the worker is all a row can add, and an agy worker's title is a prompt.
+	tokenRunWorker = "run_worker"
+	statePrefix    = "state_"
+	titlePrefix    = "title_"
 )
 
 // foldMark leads a folded family's line, as Herdr's own folded worktree
@@ -72,7 +75,7 @@ func paneTokenNames() []string {
 		tokenGroup, tokenGroupStale, tokenGroupParent, tokenGap,
 		tokenSortKey, tokenWsKey, tokenTabKey,
 		tokenFold, tokenFoldCount, tokenFolded,
-		tokenRunState, tokenRunSignal, tokenRunAge, tokenRunMachine, tokenRunOwner, tokenRunRepo,
+		tokenRunState, tokenRunSignal, tokenRunAge, tokenRunMachine, tokenRunOwner, tokenRunRepo, tokenRunWorker,
 	}
 	for _, state := range domain.DisplayStates() {
 		names = append(names, statePrefix+string(state), titlePrefix+string(state))
@@ -233,6 +236,9 @@ func (p Presentation) rowTokens(row domain.SidebarRow, step int64, now time.Time
 	tokens.set(tokenSortKey, row.Keys.Pane)
 	tokens.set(tokenWsKey, row.Keys.Workspace)
 	tokens.set(tokenTabKey, row.Keys.Tab)
+	// The worker comes from the label, not the ledger: a row that the join
+	// missed is still a worker, and its title may be a shell prompt.
+	tokens.set(tokenRunWorker, normalizeRunToken(domain.WorkerName(row.Label)))
 	if row.Run != nil {
 		tokens.set(tokenRunState, normalizeRunToken(row.Run.State))
 		tokens.set(tokenRunSignal, normalizeRunToken(row.Run.SignalStatus))
