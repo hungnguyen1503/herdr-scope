@@ -31,6 +31,15 @@ session.
 - **A family whose parent runs no agent is still one block.** Its members sit under one
   synthesised row named after the folder (or the repository), not scattered under a row
   each: a folder that only hosts worktrees reads as the folder.
+- **`stable` sorts by nothing live.** Herdr's workspace number, then its tab and pane layout
+  order: focusing a row clears its `✓`, and the activity orders re-sort it out from under the
+  cursor. Stable also never moves a workspace (`reorder_workspaces` renumbers them) and never
+  folds: a fold line appearing when a hidden agent starts waiting shifts the rows below it.
+- **A label's first segment groups its workers (`stable` only).** A worker workspace reads
+  `<chief>.<repo>.<worker>`; the segment before the first dot is the tag, capped at 16
+  characters because it doubles as a synthesised header. A worktree of a tagged workspace
+  keeps the git family unless its own label carries a tag: the label is the only thing that
+  names a chief, git says nothing about one.
 
 ## Look
 

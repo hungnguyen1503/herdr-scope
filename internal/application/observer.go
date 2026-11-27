@@ -594,7 +594,12 @@ func (o *Observer) hostGrouped() bool {
 // reorderWorkspaces moves Herdr's workspaces: into Scope's activity order
 // (reorder_workspaces, not while the order is Herdr's own), or else just
 // enough to keep each nested folder right under its parent (nest_folders).
+// Stable moves nothing at all: its keys are Herdr's numbers, and a move
+// renumbers them.
 func (o *Observer) reorderWorkspaces(ctx context.Context) {
+	if o.mode == domain.SortStable {
+		return
+	}
 	byActivity := o.settings.ReorderWorkspaces && o.mode != domain.SortOff
 	if o.deps.Mover == nil || (!byActivity && !o.settings.Policy.NestFolders) {
 		return

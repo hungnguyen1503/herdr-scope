@@ -213,6 +213,33 @@ func TestIndentZeroKeepsHeadersGapsAndMarks(t *testing.T) {
 	assert.Equal(t, "§", val(t, tokens, "logo_idle"), "zero indent draws no indent")
 }
 
+// TestATagHeaderNamesTheChief is the wire end of the stable order: the
+// synthesised row's $group_parent is the tag itself, and a tagged member
+// wears no worktree mark, since the tag is what it hangs under.
+func TestATagHeaderNamesTheChief(t *testing.T) {
+	s := ports.DefaultSettings()
+	s.Presentation.Variant = ports.VariantText
+	s.Presentation.WorktreeMark = "*"
+	p := NewPresentation(s, nil)
+	view := domain.BuildSidebar(domain.SidebarInput{
+		At: at0(), Mode: domain.SortStable, Policy: s.Policy,
+		Workspaces: []domain.Workspace{
+			{ID: "w1", Label: "app", Number: 1},
+			{ID: "w2", Label: "c1.app.worker", Number: 2},
+		},
+		Agents: []domain.ObservedAgent{
+			{Agent: domain.Agent{ID: "a1", Pane: "w1:p1", Tab: "w1:t1", Workspace: "w1", Kind: "claude"}, Display: domain.DisplayIdle},
+			{Agent: domain.Agent{ID: "a2", Pane: "w2:p1", Tab: "w2:t1", Workspace: "w2", Kind: "claude"}, Display: domain.DisplayIdle},
+		},
+	})
+	require.Len(t, view.Groups, 2)
+	tagged := view.Groups[1]
+	require.Equal(t, "c1", tagged.OrphanRepo, "the tag is the synthesised row")
+	tokens := p.PaneTokens(view, tagged, 0)
+	assert.Equal(t, "c1", val(t, tokens, "group_parent"))
+	assert.Equal(t, "└─ c1.app.worker", val(t, tokens, "group"), "no mark: the tag names the parent, not git")
+}
+
 func TestWorktreeBranches(t *testing.T) {
 	p := textPresentation()
 	p.WorktreeMark = "\uF418"

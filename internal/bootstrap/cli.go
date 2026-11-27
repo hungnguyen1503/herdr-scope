@@ -208,7 +208,7 @@ func configCommand(runtime func() *Runtime) *cobra.Command {
 }
 
 func viewCommand(runtime func() *Runtime) *cobra.Command {
-	var flip, cycle, native, here, triage, active, recent, off, reapply bool
+	var flip, cycle, native, here, triage, stable, active, recent, off, reapply bool
 	cmd := &cobra.Command{
 		Use: "view", Short: "Switch the Agents panel order (prefix+a runs --flip)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -226,6 +226,8 @@ func viewCommand(runtime func() *Runtime) *cobra.Command {
 				op, set = "", domain.SortActive
 			case recent:
 				op, set = "", domain.SortRecent
+			case stable:
+				op, set = "", domain.SortStable
 			case off:
 				op, set = "", domain.SortOff
 			case reapply:
@@ -255,6 +257,7 @@ func viewCommand(runtime func() *Runtime) *cobra.Command {
 	cmd.Flags().BoolVar(&native, "native", false, "Herdr's panel <-> Scope's")
 	cmd.Flags().BoolVar(&here, "here", false, "only the focused workspace and its family <-> active (prefix+f)")
 	cmd.Flags().BoolVar(&triage, "triage", false, "needs-you first (question, unseen result, working, idle) <-> active")
+	cmd.Flags().BoolVar(&stable, "stable", false, "grouped by chief tag, no row ever moves")
 	cmd.Flags().BoolVar(&active, "active", false, "grouped, busiest first")
 	cmd.Flags().BoolVar(&recent, "recent", false, "flat, by activity")
 	cmd.Flags().BoolVar(&off, "off", false, "Herdr's own order")
@@ -274,6 +277,8 @@ func describeMode(mode domain.SortMode) string {
 		return "agent view: here (the focused workspace and its family)"
 	case domain.SortTriage:
 		return "agent view: triage (grouped, needs-you first)"
+	case domain.SortStable:
+		return "agent view: stable (grouped by chief tag, in Herdr's order)"
 	}
 	return "agent view: " + string(mode)
 }

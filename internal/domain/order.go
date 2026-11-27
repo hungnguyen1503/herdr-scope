@@ -26,6 +26,9 @@ type SortKeys struct {
 const (
 	noStamp         = "000000000000"
 	maxMinute int64 = 999999999999
+	// layoutCeil is the top of the descending layout keys: a list this long
+	// is past any terminal Herdr draws.
+	layoutCeil int64 = maxMinute
 )
 
 // minuteKey is an activity stamp at minute grain, zero-padded so that string
@@ -129,6 +132,9 @@ type ranking struct {
 	parentOf   map[WorkspaceID]WorkspaceID
 	orphanOf   map[WorkspaceID]WorkspaceID
 	orphanRepo map[WorkspaceID]string
+	// famOf overrides family(): under stable a worktree of a tagged checkout
+	// rides with the tag, or its corner would point into another block.
+	famOf      map[WorkspaceID]WorkspaceID
 	detached   map[WorkspaceID]bool
 	splitChild map[PaneID]bool
 }
@@ -148,6 +154,9 @@ func (r ranking) nested(ws WorkspaceID) bool {
 // family is the block a workspace ranks with: its parent, listed or
 // synthesised, or itself.
 func (r ranking) family(ws WorkspaceID) WorkspaceID {
+	if family, ok := r.famOf[ws]; ok {
+		return family
+	}
 	if parent, ok := r.parentOf[ws]; ok {
 		return parent
 	}
@@ -164,27 +173,41 @@ func (r ranking) family(ws WorkspaceID) WorkspaceID {
 // contiguous, parent first. When the parent runs no agent the members still
 // stay together, under a synthesised parent row (orphanRepo: the folder's
 // name, or the repository's).
-func rank(entries []orderEntry, tree WorktreeTree, mode SortMode, runRootSet bool, owners map[PaneID]struct{}, pinned map[PaneID]SortKeys) ranking {
+//
+// Under stable the keys read no activity at all: the workspace number, then
+// Herdr's tab and pane order, so nothing a status change does can move a row.
+// A chief tag from a workspace label is the family there, whatever git says.
+func rank(
+	entries []orderEntry, tree WorktreeTree, mode SortMode, numbers map[WorkspaceID]int,
+	runRootSet bool, owners map[PaneID]struct{}, pinned map[PaneID]SortKeys,
+) ranking {
 	r := ranking{
 		pane: make(map[PaneID]string, len(entries)), workspace: map[WorkspaceID]string{},
 		tab: make(map[PaneID]string, len(entries)), parentOf: map[WorkspaceID]WorkspaceID{},
 		orphanOf: map[WorkspaceID]WorkspaceID{}, orphanRepo: map[WorkspaceID]string{}, detached: map[WorkspaceID]bool{},
 		splitChild: make(map[PaneID]bool, len(entries)),
 	}
+	stable := mode == SortStable
 	keys := make([]string, len(entries))
 	own := map[WorkspaceID]string{}
 	present := map[WorkspaceID]bool{}
 	var wsOrder []WorkspaceID
 	for i, e := range entries {
-		key := minuteKey(e.activity)
-		if mode == SortTriage {
+		var key string
+		switch {
+		case stable:
+			// Its layout position, laid out once the families are known.
+		case mode == SortTriage:
 			_, owner := owners[e.agent.Pane]
 			key = triageKey(e.display, e.since, e.run, runRootSet, owner && runRootSet)
+		default:
+			key = minuteKey(e.activity)
 		}
 		// A focused row keeps the key it had before the focus cleared its ✓:
 		// substituting it here, before the workspace and tab roll-ups read
 		// keys[i], also keeps the family it leads where the family was.
-		if pin, ok := pinned[e.agent.Pane]; ok && pin.Pane != "" {
+		// Stable keys never change, so there is nothing to hold.
+		if pin, ok := pinned[e.agent.Pane]; ok && pin.Pane != "" && !stable {
 			key = pin.Pane
 		}
 		keys[i] = key
@@ -196,6 +219,10 @@ func rank(entries []orderEntry, tree WorktreeTree, mode SortMode, runRootSet boo
 		if !present[ws] {
 			present[ws] = true
 			wsOrder = append(wsOrder, ws)
+		}
+		if stable {
+			// rankStable lays the keys out from the numbers alone.
+			continue
 		}
 		if k := orNone(key); k > own[ws] {
 			own[ws] = k
@@ -217,6 +244,22 @@ func rank(entries []orderEntry, tree WorktreeTree, mode SortMode, runRootSet boo
 			}
 		}
 	}
+	if stable {
+		// A label's chief tag outranks the git tree: the workers of one chief
+		// sit under one synthesised row however they were cut. Only a label
+		// moves a workspace: an untagged one keeps the family git gives it,
+		// and detachStrays draws it plain when that family went elsewhere.
+		for ws, tag := range tree.TagOf {
+			if !present[ws] {
+				continue
+			}
+			delete(r.parentOf, ws)
+			r.orphanOf[ws] = TagRoot(tag)
+			r.orphanRepo[ws] = tag
+		}
+		rankStable(entries, &r, numbers)
+		return r
+	}
 	familyKey := map[WorkspaceID]string{}
 	for _, ws := range wsOrder {
 		if key := own[ws]; key > familyKey[r.family(ws)] {
@@ -233,6 +276,103 @@ func rank(entries []orderEntry, tree WorktreeTree, mode SortMode, runRootSet boo
 	}
 	rankTabs(entries, keys, &r)
 	return r
+}
+
+// rankStable is the ordering with nothing live in it: a workspace's key is
+// its family (a chief tag, or its git family) and Herdr's own creation
+// number, a tab's and a pane's their place in Herdr's layout. No activity, no
+// status and no pin goes in, so no repaint can reorder a row.
+func rankStable(entries []orderEntry, r *ranking, numbers map[WorkspaceID]int) {
+	own := map[WorkspaceID]string{}
+	var wsOrder []WorkspaceID
+	for _, e := range entries {
+		ws := e.agent.Workspace
+		if ws == "" {
+			continue
+		}
+		if _, seen := own[ws]; !seen {
+			own[ws] = numberKey(numbers[ws])
+			wsOrder = append(wsOrder, ws)
+		}
+	}
+	// A worktree of a tagged checkout rides with the tag, so that every block
+	// reads as one family to the furniture above and below it.
+	r.famOf = make(map[WorkspaceID]WorkspaceID, len(wsOrder))
+	for _, ws := range wsOrder {
+		r.famOf[ws] = r.family(ws)
+	}
+	for _, ws := range wsOrder {
+		if parent, child := r.parentOf[ws]; child {
+			r.famOf[ws] = r.famOf[parent]
+		}
+	}
+	// A family stands where its eldest member was created: the largest key
+	// under the host's descending sort is the smallest number.
+	familyKey := map[WorkspaceID]string{}
+	for _, ws := range wsOrder {
+		if key := own[ws]; key > familyKey[r.family(ws)] {
+			familyKey[r.family(ws)] = key
+		}
+	}
+	for _, ws := range wsOrder {
+		f := r.family(ws)
+		depth := "0"
+		if f == ws {
+			depth = "1"
+		}
+		r.workspace[ws] = familyKey[f] + "-" + string(f) + "-" + depth + "-" + own[ws] + "-" + string(ws)
+	}
+	// Herdr lists agents in layout order: a tab's first appearance is its
+	// place in the tab bar, a pane's its place in the split.
+	tabs, sizes := map[TabID]string{}, map[TabID]int{}
+	paneKey := make(map[PaneID]string, len(entries))
+	for i, e := range entries {
+		tab := e.agent.Tab
+		if tab == "" {
+			r.pane[e.agent.Pane] = layoutKey(i)
+			continue
+		}
+		if _, seen := tabs[tab]; !seen {
+			tabs[tab] = layoutKey(len(tabs))
+		}
+		key := layoutKey(sizes[tab])
+		sizes[tab]++
+		paneKey[e.agent.Pane] = key
+		head := "0"
+		if sizes[tab] == 1 {
+			head = "1"
+		}
+		r.tab[e.agent.Pane] = tabs[tab] + "-" + string(tab) + "-" + head + "-" + key
+		r.pane[e.agent.Pane] = key
+	}
+	for _, e := range entries {
+		tab := e.agent.Tab
+		if tab == "" {
+			continue
+		}
+		r.splitChild[e.agent.Pane] = sizes[tab] > 1 && paneKey[e.agent.Pane] != layoutKey(0)
+	}
+}
+
+// numberKey is a workspace number as a key the host's descending sort puts
+// in creation order: number 1 sorts first. A workspace Herdr did not number
+// (only an agent named it) sorts after every numbered one.
+func numberKey(n int) string {
+	if n <= 0 {
+		return noStamp
+	}
+	return layoutKey(n - 1)
+}
+
+// layoutKey is a layout position (or a workspace number) as a descending key:
+// the host sorts tokens descending, so the earliest position gets the largest
+// string.
+func layoutKey(i int) string {
+	key := strconv.FormatInt(layoutCeil-int64(i), 10)
+	if len(key) < len(noStamp) {
+		key = noStamp[len(key):] + key
+	}
+	return key
 }
 
 // rankTabs ranks the panes sharing a tab — one split screen — as a unit, by
@@ -272,7 +412,7 @@ func rankTabs(entries []orderEntry, keys []string, r *ranking) {
 func displayOrder(entries []orderEntry, mode SortMode, r ranking) []orderEntry {
 	out := append([]orderEntry(nil), entries...)
 	switch mode {
-	case SortActive, SortHere, SortTriage:
+	case SortActive, SortHere, SortTriage, SortStable:
 		sort.SliceStable(out, func(i, j int) bool { return compareActive(out[i], out[j], r) < 0 })
 	case SortRecent:
 		sort.SliceStable(out, func(i, j int) bool {

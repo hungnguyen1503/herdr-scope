@@ -36,6 +36,9 @@ func FoldKey(ws Workspace) string {
 
 // Folds reports whether folded families leave the Agents panel in this
 // order: only Scope's grouped orders install the filter that hides them.
+// stable is grouped but never folds: a fold line appearing when a hidden
+// agent starts waiting would shift the rows below it, and stable promises
+// that nothing moves.
 func (m SortMode) Folds() bool { return m == SortActive || m == SortHere || m == SortTriage }
 
 // FollowVisits is the folded roots open for a visit (SidebarInput.Opened)

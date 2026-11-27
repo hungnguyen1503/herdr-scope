@@ -110,6 +110,12 @@ description = "Rank grouped workspaces and rows by who needs you first (question
 command = ["bin/herdr-scope", "view", "--triage"]
 
 [[actions]]
+id = "view-stable"
+title = "Agents: stable <-> active"
+description = "Group workspaces by the first segment of their label (a chief's tag) and keep Herdr's workspace order: no row moves when it is focused or changes status; again for active."
+command = ["bin/herdr-scope", "view", "--stable"]
+
+[[actions]]
 id = "fold"
 title = "Agents: fold <-> unfold this folder"
 description = "Fold the focused workspace's folder (its nested folders and worktrees) in the Agents panel to one line, or unfold it. Agents waiting on you and the focused workspace stay."

@@ -178,9 +178,9 @@ func Fields() []Field {
 		{
 			Key:     FieldOrder,
 			Kind:    KindEnum,
-			Options: []string{"active", "recent", "here", "triage", "off"},
+			Options: []string{"active", "recent", "here", "triage", "stable", "off"},
 			Virtual: true,
-			Help:    "Agents panel order: active (grouped, busiest first), recent (flat, by activity), here (focused family), triage (needs-you first) or off (Herdr's order).",
+			Help:    "Agents panel order: active (grouped, busiest first), recent (flat, by activity), here (focused family), triage (needs-you first), stable (chief tag, never moves) or off (Herdr's order).",
 		},
 		boolField(
 			"reorder_workspaces",

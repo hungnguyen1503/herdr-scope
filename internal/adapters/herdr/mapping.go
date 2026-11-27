@@ -115,6 +115,7 @@ func (m Mapper) Session(s wireSnapshot) domain.Session {
 		}
 		session.Workspaces = append(session.Workspaces, domain.Workspace{
 			ID:         domain.WorkspaceID(ws.WorkspaceID),
+			Number:     ws.Number,
 			Label:      ws.Label,
 			Root:       roots[ws.WorkspaceID],
 			Repository: repository(ws.Worktree),

@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"cmp"
+	"time"
+)
 
 // TreePosition is where a group sits in the worktree tree.
 type TreePosition int
@@ -214,7 +217,13 @@ func BuildSidebar(in SidebarInput) SidebarView {
 	} else {
 		tree = ResolveTree(in.Workspaces, in.Policy.NestFolders, in.Home)
 	}
-	ranks := rank(entries, tree, in.Mode, in.RunRootSet, in.RunOwners, in.Pinned)
+	numbers := make(map[WorkspaceID]int, len(in.Workspaces))
+	for i, ws := range in.Workspaces {
+		// A number Herdr did not report falls back to its place in Herdr's
+		// own list, which is that order.
+		numbers[ws.ID] = cmp.Or(ws.Number, i+1)
+	}
+	ranks := rank(entries, tree, in.Mode, numbers, in.RunRootSet, in.RunOwners, in.Pinned)
 	grouped := in.Mode.Grouped(in.HostGrouped)
 	ordered := displayOrder(entries, in.Mode, ranks)
 	ranks = detachStrays(ordered, ranks)
@@ -228,10 +237,16 @@ func BuildSidebar(in SidebarInput) SidebarView {
 	}
 	stale := staleWorkspaces(in.Agents)
 	// A nested folder's header wears no worktree mark; a worktree a folder
-	// took in keeps its own.
+	// took in keeps its own. Under stable a tag member wears none either: the
+	// tag, not git, is what the row hangs under.
 	folders := map[WorkspaceID]bool{}
 	for _, ws := range in.Workspaces {
-		if _, ok := tree.Folders[ws.ID]; ok && !linked(ws) {
+		_, folder := tree.Folders[ws.ID]
+		if in.Mode == SortStable {
+			_, tagged := tree.TagOf[ws.ID]
+			folder = folder || tagged
+		}
+		if folder && !linked(ws) {
 			folders[ws.ID] = true
 		}
 	}

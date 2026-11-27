@@ -4,8 +4,11 @@ import "strings"
 
 // Workspace is one Herdr workspace (a Space).
 type Workspace struct {
-	ID    WorkspaceID
-	Label string
+	ID WorkspaceID
+	// Number is Herdr's workspace number: the creation order, which never
+	// follows activity. Zero when Herdr did not say.
+	Number int
+	Label  string
 	// Root is the directory the workspace's first pane was opened in; empty
 	// when unknown.
 	Root string
@@ -54,6 +57,29 @@ type WorktreeTree struct {
 	// whose checkout is not open. Herdr draws a worktree family in its Spaces
 	// column itself; these it does not know about.
 	Folders map[WorkspaceID]WorkspaceID
+	// TagOf names the chief tag a workspace's label carries, empty when it
+	// carries none. A tag wins over worktree and folder nesting: a worker cut
+	// as its own worktree of the repository still groups by its chief.
+	TagOf map[WorkspaceID]string
+}
+
+// TagRoot is the synthetic family a tag names. It is never a workspace, so
+// the family shows under one synthesised header row carrying the tag.
+func TagRoot(tag string) WorkspaceID { return WorkspaceID("tag:" + tag) }
+
+// resolveTags reads the chief tag off each workspace label. A label without a
+// dot names no tag, and neither does one that opens with the dot.
+func resolveTags(workspaces []Workspace) map[WorkspaceID]string {
+	tags := map[WorkspaceID]string{}
+	for _, ws := range workspaces {
+		if tag := ChiefTag(ws.Label); tag != "" {
+			tags[ws.ID] = tag
+		}
+	}
+	if len(tags) == 0 {
+		return nil
+	}
+	return tags
 }
 
 // ResolveWorktrees groups workspaces by repository. The member that is not a
@@ -114,6 +140,10 @@ func ResolveWorktrees(workspaces []Workspace) WorktreeTree {
 // workspace.
 func ResolveTree(workspaces []Workspace, nestFolders bool, home string) WorktreeTree {
 	tree := ResolveWorktrees(workspaces)
+	// A label's chief tag is read here so every caller sees the same families;
+	// the stable order lets it override the git tree (rank), and no other
+	// order reads it, so their nesting is unchanged.
+	tree.TagOf = resolveTags(workspaces)
 	if !nestFolders {
 		return tree
 	}

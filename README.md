@@ -95,7 +95,7 @@ applied at once. The most used options:
 | Option | Default | Values |
 | --- | --- | --- |
 | `layout` | `classic` | `classic` (`§ · ✓ title`) or `compact` (`§ ✓ title`, denser) |
-| `order` | `active` | `active` by activity, `recent`, `here` (this workspace), `triage` (needs-you first), `off` (Herdr's) |
+| `order` | `active` | `active` by activity, `recent`, `here` (this workspace), `triage` (needs-you first), `stable` (grouped by chief tag, rows never move), `off` (Herdr's) |
 | `variant` | `auto` | `font` icons, `text` (plain Unicode), `none`; `auto` picks what the terminal can draw |
 | `show_age` | `waiting` | `? 4m`, `✓ 12m` on rows waiting on you; `all` or `off` |
 | `done_hold` | `until_seen` | keep the `✓` until you look, or for a duration (`"30s"`) |

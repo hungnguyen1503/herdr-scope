@@ -416,6 +416,26 @@ func TestNestedFolderIsMovedUnderItsParentWithoutReorder(t *testing.T) {
 	}
 }
 
+func TestStableMovesNoWorkspaceEvenWithNesting(t *testing.T) {
+	f := newFixture(agentAt("a1", "w1:p1", domain.StatusIdle))
+	f.herdr.session.Workspaces = []domain.Workspace{
+		{ID: "w1", Label: "acme", Root: "/home/user/acme"},
+		{ID: "w2", Label: "notes", Root: "/home/user/src/notes"},
+		{ID: "w3", Label: "billing", Root: "/home/user/acme/services/billing"},
+	}
+	f.herdr.session.Home = "/home/user"
+	mover := &fakeMover{}
+	settings := ports.DefaultSettings()
+	settings.Policy.NestFolders = true
+	settings.ReorderWorkspaces = true
+	f.observer = NewObserver(ObserverDeps{
+		Agents: f.herdr, Session: f.herdr, Activity: f.activity, State: f.state,
+		Sidebar: f.sidebar, Host: fakeHost{grouped: true}, Mover: mover, Clock: f.clock, Logger: nopLogger{},
+	}, settings, domain.SortStable, nil)
+	frame(t, f)
+	assert.Empty(t, mover.moves, "stable's keys are Herdr's numbers, and a move renumbers them")
+}
+
 func TestHereFollowsTheFocusToAnotherFamily(t *testing.T) {
 	f := newFixture(agentAt("a1", "w1:p1", domain.StatusIdle))
 	f.herdr.session.Workspaces = []domain.Workspace{

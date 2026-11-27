@@ -353,6 +353,8 @@ func TestOrderOffersHere(t *testing.T) {
 	press(t, e, "l")
 	assert.Equal(t, "triage", value(t, e, config.FieldOrder), "here steps on like any other order")
 	press(t, e, "l")
+	assert.Equal(t, "stable", value(t, e, config.FieldOrder))
+	press(t, e, "l")
 	assert.Equal(t, "off", value(t, e, config.FieldOrder))
 }
 

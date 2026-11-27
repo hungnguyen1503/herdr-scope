@@ -5,7 +5,7 @@ type SortMode string
 
 // Sort modes. active, recent and here rank by activity; triage ranks by who
 // needs the engineer (question, unseen result, working, idle tiers), longest
-// wait first.
+// wait first; stable ranks by nothing live at all.
 const (
 	// SortActive keeps the workspace groups and ranks by activity at both
 	// levels: the busiest project first, stale rows last.
@@ -21,6 +21,12 @@ const (
 	// rows by who needs the engineer (blocked question, unseen result,
 	// working, idle tiers), longest wait first inside each rank.
 	SortTriage SortMode = "triage"
+	// SortStable groups by the chief tag a workspace label names, then keeps
+	// Herdr's own workspace number order and, inside a workspace, Herdr's
+	// layout order: nothing a status change does can move a row. Looking at a
+	// row clears its ✓, and that must never slide it out from under the
+	// cursor.
+	SortStable SortMode = "stable"
 )
 
 // DefaultSortMode is the order nobody has chosen yet. Sorting by activity is
@@ -40,6 +46,8 @@ func ParseSortMode(raw string) (SortMode, bool) {
 		return SortHere, true
 	case string(SortTriage):
 		return SortTriage, true
+	case string(SortStable):
+		return SortStable, true
 	default:
 		return "", false
 	}
@@ -77,7 +85,7 @@ func (m SortMode) Apply(op SortOp) SortMode {
 		switch m {
 		case SortOff:
 			return SortActive
-		case SortActive, SortHere, SortTriage:
+		case SortActive, SortHere, SortTriage, SortStable:
 			return SortRecent
 		case SortRecent:
 			return SortOff
@@ -107,7 +115,7 @@ func (m SortMode) Apply(op SortOp) SortMode {
 // in its grouped ("spaces") order.
 func (m SortMode) Grouped(hostGrouped bool) bool {
 	switch m {
-	case SortActive, SortHere, SortTriage:
+	case SortActive, SortHere, SortTriage, SortStable:
 		return true
 	case SortRecent:
 		return false
