@@ -98,7 +98,7 @@ func TestApplyInstallsBlocksAndKeepsTheRest(t *testing.T) {
 		"[theme.custom.light]\nactive_row_bg = \"#b9cdf2\"\n[theme.custom.dark]\nactive_row_bg = \"#232636\"\n"+
 		"# <<< HERDR-SCOPE-END theme", "under auto_switch both fills go in and Herdr picks")
 	assert.Contains(t, text, "# appearance dark", "the desktop stands in for the terminal")
-	assert.Contains(t, text, "interval_seconds = 3, timeout_seconds = 2")
+	assert.Contains(t, text, "interval_seconds = 15, timeout_seconds = 14")
 	var parsed map[string]any
 	_, err = toml.Decode(text, &parsed)
 	require.NoError(t, err, text)

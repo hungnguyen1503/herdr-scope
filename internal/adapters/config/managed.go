@@ -48,12 +48,13 @@ const (
 // keepBackups bounds the backups directory; every write makes one.
 const keepBackups = 20
 
-// tabBarInterval is how often Herdr runs the tab-bar command — it types out a
-// file, so a short interval costs a cat; the line leads with who waits, which
-// should not lag long. The timeout is derived so it can never reach the
+// tabBarInterval is how often Herdr runs the tab-bar command. On Windows every
+// tick is a process spawn (cmd.exe plus a conhost), which measured as sustained
+// CPU, so the interval is the slowest that still feels live rather than the
+// shortest the line tolerates. The timeout is derived so it can never reach the
 // interval (an overlap feeds itself).
 const (
-	tabBarInterval      = 3
+	tabBarInterval      = 15
 	tabBarTimeoutMargin = 1
 )
 
