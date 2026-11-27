@@ -7,3 +7,6 @@ coverage.html
 /build/
 /vendor/
 /_article/
+# CodeGraph's index is per-machine (database, sockets, logs); its own
+# .gitignore keeps everything but itself out of git.
+/.codegraph/
