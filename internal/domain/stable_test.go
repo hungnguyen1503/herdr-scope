@@ -143,9 +143,8 @@ func TestStableGroupsWorkersUnderTheirChiefTag(t *testing.T) {
 		agent("w3", "t1", "p1", 60, DisplayIdle)
 	assert.Equal(t, []string{
 		"# plain", "0 w1:p1", "",
-		"# @c1 ├ c1.scope.triage-order", "1 w2:p1",
-		"# └ c1.scope.activate-ledger", "1 w3:p1", "",
-	}, outline(s.build(SortStable)), "one synthesised c1 row names both workers")
+		"# c1", "1 w2:p1", "1 w3:p1", "",
+	}, outline(s.build(SortStable)), "one header names the chief, both workers under it")
 }
 
 func TestStableKeepsEachChiefsWorkersTogether(t *testing.T) {
@@ -157,9 +156,8 @@ func TestStableKeepsEachChiefsWorkersTogether(t *testing.T) {
 		agent("w2", "t1", "p1", 1, DisplayWorking).
 		agent("w3", "t1", "p1", 5, DisplayWorking)
 	assert.Equal(t, []string{
-		"# @c1 ├ c1.app.one", "1 w1:p1",
-		"# └ c1.app.three", "1 w3:p1", "",
-		"# @c2 └ c2.app.two", "1 w2:p1", "",
+		"# c1", "1 w1:p1", "1 w3:p1", "",
+		"# c2", "1 w2:p1", "",
 	}, outline(s.build(SortStable)), "one block per tag, the eldest member deciding where it stands")
 }
 
@@ -173,7 +171,7 @@ func TestStableHangsAnUntaggedWorktreeOffItsTaggedCheckout(t *testing.T) {
 		agent("w1", "t1", "p1", 5, DisplayIdle).
 		agent("w2", "t1", "p1", 1, DisplayWorking)
 	assert.Equal(t, []string{
-		"# @c1 ├ c1.app.main", "1 w1:p1",
+		"# c1", "1 w1:p1",
 		"# └ feature", "1 w2:p1", "",
 	}, outline(s.build(SortStable)), "the worktree rides in the tag's block, its corner off the checkout")
 }
@@ -201,7 +199,7 @@ func TestStableTagBeatsTheWorktree(t *testing.T) {
 		agent("w2", "t1", "p1", 1, DisplayWorking)
 	assert.Equal(t, []string{
 		"# app", "0 w1:p1", "",
-		"# @c1 └ c1.app.worker", "1 w2:p1", "",
+		"# c1", "1 w2:p1", "",
 	}, outline(s.build(SortStable)), "the label's tag wins over the shared repository")
 
 	// An untagged worktree of the same checkout keeps the family git gives it:
@@ -216,7 +214,7 @@ func TestStableTagBeatsTheWorktree(t *testing.T) {
 	assert.Equal(t, []string{
 		"# app", "0 w1:p1",
 		"# └ hotfix", "1 w3:p1", "",
-		"# @c1 └ c1.app.worker", "1 w2:p1", "",
+		"# c1", "1 w2:p1", "",
 	}, outline(s.build(SortStable)), "only the tagged label leaves the checkout's family")
 }
 

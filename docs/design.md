@@ -37,9 +37,11 @@ session.
   folds: a fold line appearing when a hidden agent starts waiting shifts the rows below it.
 - **A label's first segment groups its workers (`stable` only).** A worker workspace reads
   `<chief>.<repo>.<worker>`; the segment before the first dot is the tag, capped at 16
-  characters because it doubles as a synthesised header. A worktree of a tagged workspace
-  keeps the git family unless its own label carries a tag: the label is the only thing that
-  names a chief, git says nothing about one.
+  characters because it doubles as the header. The tag is the block's one header, drawn once
+  over every member, however many there are, whatever their repositories and whichever of them
+  has no agent: a per-member header is what split one chief into two blocks (seen). A worktree
+  of a tagged workspace keeps the git family unless its own label carries a tag: the label is
+  the only thing that names a chief, git says nothing about one.
 
 ## Look
 

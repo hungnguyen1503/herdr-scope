@@ -134,9 +134,20 @@ type ranking struct {
 	orphanRepo map[WorkspaceID]string
 	// famOf overrides family(): under stable a worktree of a tagged checkout
 	// rides with the tag, or its corner would point into another block.
-	famOf      map[WorkspaceID]WorkspaceID
+	famOf map[WorkspaceID]WorkspaceID
+	// tagOf names the chief tag a workspace's label carries. A tag family is
+	// one header, not one per member: every tagged workspace shares the one
+	// the family's first member draws.
+	tagOf      map[WorkspaceID]string
 	detached   map[WorkspaceID]bool
 	splitChild map[PaneID]bool
+}
+
+// tagged is the chief tag a workspace's label carries, and whether it carries
+// one.
+func (r ranking) tagged(ws WorkspaceID) (string, bool) {
+	tag, ok := r.tagOf[ws]
+	return tag, ok
 }
 
 func (r ranking) keys(agent Agent) SortKeys {
@@ -185,6 +196,7 @@ func rank(
 		pane: make(map[PaneID]string, len(entries)), workspace: map[WorkspaceID]string{},
 		tab: make(map[PaneID]string, len(entries)), parentOf: map[WorkspaceID]WorkspaceID{},
 		orphanOf: map[WorkspaceID]WorkspaceID{}, orphanRepo: map[WorkspaceID]string{}, detached: map[WorkspaceID]bool{},
+		tagOf:      map[WorkspaceID]string{},
 		splitChild: make(map[PaneID]bool, len(entries)),
 	}
 	stable := mode == SortStable
@@ -256,6 +268,7 @@ func rank(
 			delete(r.parentOf, ws)
 			r.orphanOf[ws] = TagRoot(tag)
 			r.orphanRepo[ws] = tag
+			r.tagOf[ws] = tag
 		}
 		rankStable(entries, &r, numbers)
 		return r

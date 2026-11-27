@@ -420,8 +420,35 @@ func (b *rowBuilder) corner(a Agent) Corner {
 	return CornerTee
 }
 
-// groups splits the ordered rows into contiguous workspace runs and decides
-// each run's header, tree position and gap.
+// block is the run a workspace's rows join: its chief tag's family, or the
+// workspace itself.
+func (b *rowBuilder) block(ws WorkspaceID) WorkspaceID {
+	if tag, tagged := b.ranks.tagged(ws); tagged {
+		return TagRoot(tag)
+	}
+	return ws
+}
+
+// blockStale is whether every agent of a block has gone stale. A tag family
+// is stale only when all its members are; a member with no agent cannot keep
+// it fresh.
+func (b *rowBuilder) blockStale(stale map[WorkspaceID]bool) map[WorkspaceID]bool {
+	out := map[WorkspaceID]bool{}
+	seen := map[WorkspaceID]bool{}
+	for ws, quiet := range stale {
+		block := b.block(ws)
+		if !seen[block] {
+			seen[block], out[block] = true, quiet
+			continue
+		}
+		out[block] = out[block] && quiet
+	}
+	return out
+}
+
+// groups splits the ordered rows into contiguous runs and decides each run's
+// header, tree position and gap. A chief tag's members are one run: the tag
+// is the header, so two workers of one chief never read as two blocks.
 func (b *rowBuilder) groups(ordered []orderEntry, stale map[WorkspaceID]bool) []SidebarGroup {
 	var order []WorkspaceID
 	seen := map[WorkspaceID]bool{}
@@ -447,6 +474,7 @@ func (b *rowBuilder) groups(ordered []orderEntry, stale map[WorkspaceID]bool) []
 			noGap[order[i]] = true
 		}
 	}
+	blockStale := b.blockStale(stale)
 
 	var groups []SidebarGroup
 	headerShown := map[WorkspaceID]bool{}
@@ -455,17 +483,18 @@ func (b *rowBuilder) groups(ordered []orderEntry, stale map[WorkspaceID]bool) []
 		if lone := b.carriers[e.agent.Pane]; lone != nil && lone.Alone {
 			// A fold line is a group of its own: no header, and a gap only
 			// when nothing of its family stays under it.
-			g := b.newGroup(ws, false, places[ws], stale)
+			g := b.newGroup(ws, false, places[ws], blockStale[b.block(ws)])
 			g.Rows = []SidebarRow{b.row(e)}
 			// Gap marks where a block ends until spacing decides the blank rows.
 			g.Gap = !lone.Kept
 			groups = append(groups, g)
 			continue
 		}
-		if n := len(groups); n == 0 || groups[n-1].Workspace != ws || b.lone(groups[n-1].Rows[0].Pane) {
+		block := b.block(ws)
+		if n := len(groups); n == 0 || groups[n-1].Workspace != block || b.lone(groups[n-1].Rows[0].Pane) {
 			// A fold line names its root in place of the root's header.
-			groups = append(groups, b.newGroup(ws, !headerShown[ws] && ws != "" && !folded[ws], places[ws], stale))
-			headerShown[ws] = true
+			groups = append(groups, b.newGroup(ws, !headerShown[block] && ws != "" && !folded[block], places[ws], blockStale[block]))
+			headerShown[block] = true
 		}
 		g := &groups[len(groups)-1]
 		g.Rows = append(g.Rows, b.row(e))
@@ -548,10 +577,16 @@ func (b *rowBuilder) places(order []WorkspaceID, folded map[WorkspaceID]bool) ma
 	return out
 }
 
-func (b *rowBuilder) newGroup(ws WorkspaceID, header bool, p place, stale map[WorkspaceID]bool) SidebarGroup {
+func (b *rowBuilder) newGroup(ws WorkspaceID, header bool, p place, stale bool) SidebarGroup {
+	if tag, tagged := b.ranks.tagged(ws); tagged {
+		// The tag is the block: one header names the chief, so no member
+		// draws a header of its own, no corner hangs it off the last, and the
+		// tag family is no worktree to mark.
+		return SidebarGroup{Workspace: TagRoot(tag), Label: tag, Tree: TreeRoot, Header: header, Stale: stale, Folder: true}
+	}
 	return SidebarGroup{
 		Workspace: ws, Label: labelOf(b.labels, ws), Tree: p.tree, OrphanRepo: p.parent,
-		Header: header, Stale: stale[ws], Folder: b.folders[ws],
+		Header: header, Stale: stale, Folder: b.folders[ws],
 	}
 }
 

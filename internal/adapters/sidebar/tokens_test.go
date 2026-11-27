@@ -213,9 +213,9 @@ func TestIndentZeroKeepsHeadersGapsAndMarks(t *testing.T) {
 	assert.Equal(t, "§", val(t, tokens, "logo_idle"), "zero indent draws no indent")
 }
 
-// TestATagHeaderNamesTheChief is the wire end of the stable order: the
-// synthesised row's $group_parent is the tag itself, and a tagged member
-// wears no worktree mark, since the tag is what it hangs under.
+// TestATagHeaderNamesTheChief is the wire end of the stable order: the tag is
+// the block's own header, with no synthesised parent row and no worktree mark,
+// since the tag is what the rows hang under.
 func TestATagHeaderNamesTheChief(t *testing.T) {
 	s := ports.DefaultSettings()
 	s.Presentation.Variant = ports.VariantText
@@ -234,10 +234,11 @@ func TestATagHeaderNamesTheChief(t *testing.T) {
 	})
 	require.Len(t, view.Groups, 2)
 	tagged := view.Groups[1]
-	require.Equal(t, "c1", tagged.OrphanRepo, "the tag is the synthesised row")
+	require.Equal(t, "c1", tagged.Label, "the tag is the block's header")
+	assert.Empty(t, tagged.OrphanRepo, "no synthesised parent row above it")
 	tokens := p.PaneTokens(view, tagged, 0)
-	assert.Equal(t, "c1", val(t, tokens, "group_parent"))
-	assert.Equal(t, "└─ c1.app.worker", val(t, tokens, "group"), "no mark: the tag names the parent, not git")
+	assert.Equal(t, "c1", val(t, tokens, "group"), "the tag names the header")
+	assert.Empty(t, val(t, tokens, "group_parent"), "nothing is synthesised above it")
 }
 
 func TestWorktreeBranches(t *testing.T) {
