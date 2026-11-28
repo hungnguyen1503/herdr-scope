@@ -154,16 +154,7 @@ const COLLAPSED_KEY = "scope.collapsed";
 const STATE_SORT_KEY = "scope.stateSort";
 const STATE_SORT_RANK = { working: 0, blocked: 1, idle: 2, done: 3 };
 
-// Shorten chief names for the compact header badge only ("bunny-chief-1" -> "b1",
-// "chief-2" -> "c2"); group headers keep the full tag.
-function shortChief(chief) {
-  const s = String(chief ?? "").trim();
-  if (!s) return "";
-  if (s.startsWith("bunny-chief-")) return "b" + s.slice("bunny-chief-".length);
-  if (s.startsWith("bunny-")) return "b" + s.slice("bunny-".length);
-  if (s.startsWith("chief-")) return "c" + s.slice("chief-".length);
-  return s;
-}
+
 
 function loadStoredSet(key) {
   try {
@@ -373,51 +364,12 @@ export default class Scope extends View {
     const panelOrder = groups.flatMap((g) => displayMembers(g));
     setAgentOrder(panelOrder.map((a) => a.address));
 
-    // Per-chief active/total counts for the header badge: active = live agents in
-    // that chief's group, total = unique runs per chief from the ledger join.
-    const ledgerTotals = new Map();
-    if (led && !led.missing) {
-      for (const rec of led.byLabel.values()) {
-        if (!rec?.chief) continue;
-        ledgerTotals.set(rec.chief, (ledgerTotals.get(rec.chief) ?? 0) + 1);
-      }
-    }
-    const activeByChief = new Map();
-    for (const g of groups) {
-      if (!g.tag) continue;
-      activeByChief.set(g.tag, (activeByChief.get(g.tag) ?? 0) + g.members.length);
-    }
-    const chiefCounts = [];
-    const seenChiefs = new Set();
-    for (const [chief, active] of activeByChief) {
-      seenChiefs.add(chief);
-      const total = Math.max(ledgerTotals.get(chief) ?? 0, active);
-      chiefCounts.push({ chief, short: shortChief(chief), active, total });
-    }
-    const ledgerOnly = [...ledgerTotals.entries()]
-      .filter(([chief]) => !seenChiefs.has(chief))
-      .sort((a, b) => b[1] - a[1]);
-    for (const [chief, total] of ledgerOnly) {
-      chiefCounts.push({ chief, short: shortChief(chief), active: 0, total });
-    }
     const p = bunnyPalette(t);
-    // Block state is an icon, not a text badge (the engineer's ask, and the
-    // pattern mods/agents already follows with its `clock` sort chip): the
-    // full counts live in the tooltip; the clock's colour carries the state —
-    // caution while any chief still runs, ok when its workers are done, dim
-    // while the ledger is loading, off or missing.
-    const badgeFull = chiefCounts.map((c) => `${c.short} ${c.active}/${c.total}`).join(" · ");
-    const ledgerIn = led !== null && led.dir && !led.missing;
-    const clockTip = led === null
-      ? "ledger: loading"
-      : !led.dir
-        ? "ledger: off"
-        : led.missing
-          ? "ledger: no runs"
-          : badgeFull || "0 active";
-    const clockColor = ledgerIn && chiefCounts.length > 0
-      ? (chiefCounts.some((c) => c.active > 0) ? p.caution : p.ok)
-      : t.dim;
+    // The panel's single sort control, header-side (the engineer's ask): the
+    // Agents-panel icon idiom — `mods/workspace-chrome/clock.svg` is that
+    // panel's sort glyph — applied to every group at once. Off keeps the
+    // stable created order; on orders each group by state.
+    const sortOn = this.groupIds.length > 0 && this.groupIds.every((id) => this.stateSort.has(id));
     const status = (a) => {
       if (a.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).mx(1).flex_none().text_color(p.caution).spin(900);
       if (a.status === "blocked") return div().flex_none().px(5).h(16).rounded(5).bg(p.danger + "26").text_size(10).font_semibold().text_color(p.danger).flex().items_center().child("Needs you");
@@ -435,7 +387,6 @@ export default class Scope extends View {
         : g.members.some((a) => a.status === "working") ? "working" : null;
       const headColor = top === "blocked" ? p.danger : top === "working" ? p.caution : p.identity;
       const isCollapsed = this.collapsed.has(g.id);
-      const isStateSort = this.stateSort.has(g.id);
       rows.push(h_flex()
         .id(`sc-h-${g.id}`)
         .px(10).pt(6).pb(2).h(26).flex_none().gap(5).items_center().rounded(6)
@@ -448,22 +399,7 @@ export default class Scope extends View {
         .child(svg(`mods/workspace-chrome/chevron-${isCollapsed ? "right" : "down"}.svg`).size(10).flex_none().text_color(headColor))
         .child(div().flex_1().min_w(0).truncate().child(head))
         .when(isCollapsed, (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child(String(g.members.length))))
-        .when(Boolean(top), (el) => el.child(div().size(6).flex_none().rounded(3).bg(headColor)))
-        .child(div()
-          .id(`sc-sort-${g.id}`)
-          .flex_none().px(5).h(16).rounded(4).flex().items_center()
-          .text_size(9.5).cursor_pointer()
-          .when(isStateSort, (el) => el.bg(p.accent2 + "26").text_color(p.accent2).font_semibold())
-          .when(!isStateSort, (el) => el.text_color(t.dim).hover((s) => s.bg(t.raised).text_color(p.title)))
-          .tooltip(isStateSort
-            ? "Order: state (working → blocked → idle → done; rows move). Click for stable created order"
-            : "Order: created (stable). Click to sort by state (rows move)")
-          .on_click((_e, cx) => {
-            cx.stop_propagation();
-            this.toggleStateSort(g.id);
-            cx.notify();
-          })
-          .child(isStateSort ? "state" : "sort")));
+        .when(Boolean(top), (el) => el.child(div().size(6).flex_none().rounded(3).bg(headColor))));
 
       if (isCollapsed) continue;
 
@@ -493,9 +429,20 @@ export default class Scope extends View {
         .child(svg("icons-bunny/bunny-chief.svg").size(14).flex_none().text_color(p.accent2))
         .child(div().flex_none().text_size(11.5).font_semibold().text_color(p.accent2).child("Scope"))
         .child(div().flex_1().min_w(4))
-        .child(div().id("sc-clock").flex_none().w(18).flex().items_center().justify_center()
-          .tooltip(clockTip)
-          .child(svg("mods/workspace-chrome/clock.svg").size(14).flex_none().text_color(clockColor))))
+        .child(div().id("sc-sort-toggle").flex_none().w(24).h(20).flex().items_center().justify_center()
+          .rounded(4).cursor_pointer()
+          .when(sortOn, (el) => el.bg(p.accent2 + "26"))
+          .hover((s) => s.bg(t.hover))
+          .tooltip(sortOn
+            ? "Order: state in every group (working → blocked → idle → done; rows move). Click for the stable created order"
+            : "Order: created (stable). Click to sort every group by state (rows move)")
+          .on_click((_e, cx) => {
+            if (sortOn) this.stateSort.clear();
+            else for (const id of this.groupIds) this.stateSort.add(id);
+            saveStoredSet(STATE_SORT_KEY, this.stateSort);
+            cx.notify();
+          })
+          .child(svg("mods/workspace-chrome/clock.svg").size(14).flex_none().text_color(sortOn ? p.accent2 : t.dim))))
       .when(ordered.length === 0, (el) => el.child(
         div().px(12).text_size(12).text_color(t.dim).child("No agents yet. Workers appear here grouped under their chief tag, in the order their spaces were created.")))
       .child(v_flex().id("sc-list").flex_1().min_h(0).px(8).overflow_y_scrollbar().mode("always").children(rows));

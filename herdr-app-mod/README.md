@@ -71,17 +71,20 @@ herdr-app check <this folder>    # prints "check passed"
    `machine/term_x` addresses are matched on their `term_x` tail), falling
    back to `workspaceLabel == space_name`. A matched run adds the ledger
    chips: `state` (`running`, `awaiting-review`, …), `runtime` (`omp`), and
-   `machine` when the address carries none. The chief block state — active
-   and total runs per chief (`b1 0/42 · b2 0/2 +2`) — shows as a **clock
-   icon** at the right of the header strip, the way the Agents panel wears
-   its sort icons: colour carries the state (caution while any chief runs,
-   ok when they are idle, dim when the ledger says nothing), the full counts
-   live in the tooltip. No block text sits in the panel.
+   `machine` when the address carries none.
 3. **Degradation** — the ledger is enrichment only. If the folder is absent,
    unreadable, or a file is the old schema (no `workers[]`), the mod still
-   groups and orders by the live labels; rows simply lose their chips and the
-   header clock dims, its tooltip reading `ledger: no runs` / `ledger: off`.
+   groups and orders by the live labels; rows simply lose their chips.
    An agent with no ledger match is unaffected.
+
+The panel shows no chief block-state anywhere — no badge text, no icon
+(engineer's call after seeing `b1 0/42 · b2 0/2 +2`). The header's right-hand
+icon slot carries the panel's one sort control instead, in the Agents-panel
+icon idiom (`mods/workspace-chrome/clock.svg`, that panel's own sort glyph):
+one click orders every group by state (working → blocked → idle → done,
+rows move), the next returns all groups to the stable created order. The
+per-group `state`/`sort` text chips are gone; the icon is accent-coloured
+on a tinted ground while state order is on, dim while created order is.
 
 ## View props
 
