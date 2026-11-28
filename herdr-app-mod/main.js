@@ -9,7 +9,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, spaces, theme, settings, run, shared, setAgentOrder, props, checking, home, exec, readTextFile, nextCommand } from "herdr";
+import { agents, spaces, theme, settings, run, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, checking, home, exec, readTextFile, nextCommand } from "herdr";
 
 function isDarkAppearance(t) {
   const s = settings();
@@ -151,8 +151,18 @@ function groupsOf(ordered, fam) {
 const clean = (s) => (s ?? "").replace(/^(?:\[ [!.] \] |[✋⏳]\uFE0F?(?=\s)|(?!(?:\p{Emoji}\uFE0F|[#*]\u20E3))[^\p{L}\p{N}\p{Ps}\p{Pi}\p{Emoji_Presentation}])+/u, "").trim();
 
 const COLLAPSED_KEY = "scope.collapsed";
-const STATE_SORT_KEY = "scope.stateSort";
 const STATE_SORT_RANK = { working: 0, blocked: 1, idle: 2, done: 3 };
+
+// The two orders the panel offers, in the Agents idiom: the header icon shows
+// the current one and a click pops up the choice. `created` is the ported Go
+// rule (rows never move); `state` orders each group working → blocked → idle
+// → done. Kept in shared state like `agents.sort`: persisted, and every mod
+// re-renders when it changes.
+const SORTS = [
+  { id: "created", label: "Created (stable)", icon: "layers" },
+  { id: "state", label: "State (rows move)", icon: "clock" },
+];
+const sortOf = () => SORTS.find((s) => s.id === shared("scope.sort")) ?? SORTS[0];
 
 
 
@@ -236,9 +246,9 @@ async function loadLedger(dir) {
 
 export default class Scope extends View {
   init(_props, cx) {
+    if (props()?.sortMenu) return;
     this.ledger = null;
     this.collapsed = loadStoredSet(COLLAPSED_KEY);
-    this.stateSort = loadStoredSet(STATE_SORT_KEY);
     this.groupIds = [];
     this.activeGroupId = null;
     this.closed = false;
@@ -262,6 +272,35 @@ export default class Scope extends View {
     this.closed = true;
   }
 
+  // The popup the header sort icon opens, in the `agents` idiom: the host
+  // renders this mod again with `props().sortMenu` and the overlay's own
+  // `props().overlay`; a choice writes `scope.sort` and closes itself.
+  sortMenu(t) {
+    const on = sortOf().id;
+    return v_flex()
+      .w_full()
+      .p(5)
+      .bg(t.popover)
+      .text_size(12.8)
+      .child(div().px(8).pt(4).pb(6).text_size(11).text_color(t.dim).child("Sort rows"))
+      .children(SORTS.map((s) => h_flex()
+        .id(`sort-${s.id}`)
+        .h(31)
+        .px(8)
+        .gap(9)
+        .rounded(7)
+        .items_center()
+        .text_color(t.foreground)
+        .hover((el) => el.bg(t.hover))
+        .on_click(() => {
+          setShared("scope.sort", s.id);
+          closeOverlay(props().overlay);
+        })
+        .child(svg(`mods/workspace-chrome/${s.icon}.svg`).size(14).flex_none().text_color(t.muted))
+        .child(div().flex_1().child(s.label))
+        .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
+  }
+
   toggleCollapsed(groupId) {
     if (!groupId) return;
     if (this.collapsed.has(groupId)) this.collapsed.delete(groupId);
@@ -269,17 +308,10 @@ export default class Scope extends View {
     saveStoredSet(COLLAPSED_KEY, this.collapsed);
   }
 
-  toggleStateSort(groupId) {
-    if (!groupId) return;
-    if (this.stateSort.has(groupId)) this.stateSort.delete(groupId);
-    else this.stateSort.add(groupId);
-    saveStoredSet(STATE_SORT_KEY, this.stateSort);
-  }
-
   handleCommand(cmd, cx) {
     const target = this.activeGroupId || this.groupIds[0];
     if (cmd === "toggle-collapse") this.toggleCollapsed(target);
-    else if (cmd === "toggle-sort") this.toggleStateSort(target);
+    else if (cmd === "toggle-sort") setShared("scope.sort", sortOf().id === "state" ? "created" : "state");
     else if (cmd === "collapse-all") {
       for (const id of this.groupIds) this.collapsed.add(id);
       saveStoredSet(COLLAPSED_KEY, this.collapsed);
@@ -287,11 +319,9 @@ export default class Scope extends View {
       this.collapsed.clear();
       saveStoredSet(COLLAPSED_KEY, this.collapsed);
     } else if (cmd === "sort-created") {
-      this.stateSort.clear();
-      saveStoredSet(STATE_SORT_KEY, this.stateSort);
+      setShared("scope.sort", "created");
     } else if (cmd === "sort-state") {
-      for (const id of this.groupIds) this.stateSort.add(id);
-      saveStoredSet(STATE_SORT_KEY, this.stateSort);
+      setShared("scope.sort", "state");
     } else {
       return;
     }
@@ -300,6 +330,7 @@ export default class Scope extends View {
 
   render() {
     const t = theme();
+    if (props()?.sortMenu) return this.sortMenu(t);
     const list = (agents() ?? []).filter((a) => a.space);
 
     // The space label: the app's space name first (Bunny creates worker spaces
@@ -348,7 +379,7 @@ export default class Scope extends View {
         : (clean(a.tab_name) || clean(a.title) || a.program?.name || a.address);
     };
     const displayMembers = (g) => {
-      if (!this.stateSort.has(g.id)) return g.members;
+      if (sortOf().id !== "state") return g.members;
       return [...g.members].sort((x, y) => {
         const rx = STATE_SORT_RANK[x.status] ?? 4;
         const ry = STATE_SORT_RANK[y.status] ?? 4;
@@ -365,11 +396,7 @@ export default class Scope extends View {
     setAgentOrder(panelOrder.map((a) => a.address));
 
     const p = bunnyPalette(t);
-    // The panel's single sort control, header-side (the engineer's ask): the
-    // Agents-panel icon idiom — `mods/workspace-chrome/clock.svg` is that
-    // panel's sort glyph — applied to every group at once. Off keeps the
-    // stable created order; on orders each group by state.
-    const sortOn = this.groupIds.length > 0 && this.groupIds.every((id) => this.stateSort.has(id));
+    const sort = sortOf();
     const status = (a) => {
       if (a.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).mx(1).flex_none().text_color(p.caution).spin(900);
       if (a.status === "blocked") return div().flex_none().px(5).h(16).rounded(5).bg(p.danger + "26").text_size(10).font_semibold().text_color(p.danger).flex().items_center().child("Needs you");
@@ -429,20 +456,11 @@ export default class Scope extends View {
         .child(svg("icons-bunny/bunny-chief.svg").size(14).flex_none().text_color(p.accent2))
         .child(div().flex_none().text_size(11.5).font_semibold().text_color(p.accent2).child("Scope"))
         .child(div().flex_1().min_w(4))
-        .child(div().id("sc-sort-toggle").flex_none().w(24).h(20).flex().items_center().justify_center()
-          .rounded(4).cursor_pointer()
-          .when(sortOn, (el) => el.bg(p.accent2 + "26"))
-          .hover((s) => s.bg(t.hover))
-          .tooltip(sortOn
-            ? "Order: state in every group (working → blocked → idle → done; rows move). Click for the stable created order"
-            : "Order: created (stable). Click to sort every group by state (rows move)")
-          .on_click((_e, cx) => {
-            if (sortOn) this.stateSort.clear();
-            else for (const id of this.groupIds) this.stateSort.add(id);
-            saveStoredSet(STATE_SORT_KEY, this.stateSort);
-            cx.notify();
-          })
-          .child(svg("mods/workspace-chrome/clock.svg").size(14).flex_none().text_color(sortOn ? p.accent2 : t.dim))))
+        .child(div().id("sc-sort").flex_none().w(24).h(20).flex().items_center().justify_center()
+          .rounded(4).cursor_pointer().hover((s) => s.bg(t.hover))
+          .tooltip(`Sort rows: ${sort.label}`)
+          .on_click(() => openOverlay({ mod: "scope", kind: "popup", width: 200, height: 140, props: { sortMenu: true } }))
+          .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14).flex_none().text_color(t.dim))))
       .when(ordered.length === 0, (el) => el.child(
         div().px(12).text_size(12).text_color(t.dim).child("No agents yet. Workers appear here grouped under their chief tag, in the order their spaces were created.")))
       .child(v_flex().id("sc-list").flex_1().min_h(0).px(8).overflow_y_scrollbar().mode("always").children(rows));

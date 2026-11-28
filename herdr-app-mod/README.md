@@ -80,11 +80,14 @@ herdr-app check <this folder>    # prints "check passed"
 The panel shows no chief block-state anywhere — no badge text, no icon
 (engineer's call after seeing `b1 0/42 · b2 0/2 +2`). The header's right-hand
 icon slot carries the panel's one sort control instead, in the Agents-panel
-icon idiom (`mods/workspace-chrome/clock.svg`, that panel's own sort glyph):
-one click orders every group by state (working → blocked → idle → done,
-rows move), the next returns all groups to the stable created order. The
-per-group `state`/`sort` text chips are gone; the icon is accent-coloured
-on a tinted ground while state order is on, dim while created order is.
+icon idiom: a compact icon showing the current order (`layers` for the stable
+created order, `clock` for state order), and a click pops up the choice the
+same way `agents` pops up its sort menu — `openOverlay` with
+`props: { sortMenu: true }`, the mod re-rendered as the popup body, a choice
+written with `setShared("scope.sort", …)` so every mod re-renders and the
+setting persists across restarts. The per-group `state`/`sort` text chips are
+gone; the popup offers state order (working → blocked → idle → done, rows
+move) or the stable created order for every group at once.
 
 ## View props
 
