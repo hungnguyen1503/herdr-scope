@@ -9,7 +9,34 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, spaces, theme, run, shared, setAgentOrder, props, checking, home, exec, readTextFile } from "herdr";
+import { agents, spaces, theme, settings, run, shared, setAgentOrder, props, checking, home, exec, readTextFile, nextCommand } from "herdr";
+
+function isDarkAppearance(t) {
+  const s = settings();
+  if (typeof s?.dark === "boolean") return s.dark;
+  const hex = String(t?.chrome ?? "").replace("#", "");
+  if (hex.length >= 6) {
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return (0.299 * r + 0.587 * g + 0.114 * b) < 128;
+  }
+  return true;
+}
+
+function bunnyPalette(t) {
+  return isDarkAppearance(t)
+    ? { identity: "#38bdf8", title: "#93c5fd", ok: "#4ade80", caution: "#facc15", danger: "#f87171", accent2: "#a78bfa" }
+    : { identity: "#0369a1", title: "#1d4ed8", ok: "#15803d", caution: "#b45309", danger: "#b91c1c", accent2: "#6d28d9" };
+}
+
+function scopeStateColor(state, p) {
+  const s = String(state ?? "").toLowerCase();
+  if (s === "running" || s === "working" || s === "active" || s === "pending") return p.caution;
+  if (s === "done" || s === "merged" || s === "completed" || s === "passed") return p.ok;
+  if (s === "failed" || s === "error" || s === "blocked" || s === "killed") return p.danger;
+  return p.accent2;
+}
 
 // --- internal/domain/tag.go:ChiefTag — the first dot-delimited segment names
 // the group; no dot or a leading dot names none; capped at 16 code points so a
@@ -123,6 +150,38 @@ function groupsOf(ordered, fam) {
 // mark) — same rule as mods/agents/main.js, so rows read alike.
 const clean = (s) => (s ?? "").replace(/^(?:\[ [!.] \] |[✋⏳]\uFE0F?(?=\s)|(?!(?:\p{Emoji}\uFE0F|[#*]\u20E3))[^\p{L}\p{N}\p{Ps}\p{Pi}\p{Emoji_Presentation}])+/u, "").trim();
 
+const COLLAPSED_KEY = "scope.collapsed";
+const STATE_SORT_KEY = "scope.stateSort";
+const STATE_SORT_RANK = { working: 0, blocked: 1, idle: 2, done: 3 };
+
+// Shorten chief names for the compact header badge only ("bunny-chief-1" -> "b1",
+// "chief-2" -> "c2"); group headers keep the full tag.
+function shortChief(chief) {
+  const s = String(chief ?? "").trim();
+  if (!s) return "";
+  if (s.startsWith("bunny-chief-")) return "b" + s.slice("bunny-chief-".length);
+  if (s.startsWith("bunny-")) return "b" + s.slice("bunny-".length);
+  if (s.startsWith("chief-")) return "c" + s.slice("chief-".length);
+  return s;
+}
+
+function loadStoredSet(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveStoredSet(key, set) {
+  try {
+    localStorage.setItem(key, JSON.stringify([...set]));
+  } catch {}
+}
+
 // The Bunny run ledger: one JSON per finished-or-live run at
 // <FSP>/bunny-chief-of-staff/reports/orchestration-runs/<runId>.json, with
 // chief, workspaceLabel (`<chief>.<worker>`), machine, and workers[] each
@@ -187,6 +246,11 @@ async function loadLedger(dir) {
 export default class Scope extends View {
   init(_props, cx) {
     this.ledger = null;
+    this.collapsed = loadStoredSet(COLLAPSED_KEY);
+    this.stateSort = loadStoredSet(STATE_SORT_KEY);
+    this.groupIds = [];
+    this.activeGroupId = null;
+    this.closed = false;
     // `herdr-app check` runs init for real and renders once: no process reads,
     // no timers there.
     if (checking()) return;
@@ -194,6 +258,53 @@ export default class Scope extends View {
     const reload = (cx) => loadLedger(ledgerDir()).then((l) => { this.ledger = l; cx.notify(); }, () => { this.ledger = { dir: ledgerDir(), byLabel: new Map(), byTerminal: new Map(), missing: true }; });
     reload(cx);
     cx.timer.every(refresh, reload);
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const cmd = await nextCommand();
+        if (this.closed) return;
+        this.handleCommand(cmd, cx);
+      }
+    });
+  }
+
+  close() {
+    this.closed = true;
+  }
+
+  toggleCollapsed(groupId) {
+    if (!groupId) return;
+    if (this.collapsed.has(groupId)) this.collapsed.delete(groupId);
+    else this.collapsed.add(groupId);
+    saveStoredSet(COLLAPSED_KEY, this.collapsed);
+  }
+
+  toggleStateSort(groupId) {
+    if (!groupId) return;
+    if (this.stateSort.has(groupId)) this.stateSort.delete(groupId);
+    else this.stateSort.add(groupId);
+    saveStoredSet(STATE_SORT_KEY, this.stateSort);
+  }
+
+  handleCommand(cmd, cx) {
+    const target = this.activeGroupId || this.groupIds[0];
+    if (cmd === "toggle-collapse") this.toggleCollapsed(target);
+    else if (cmd === "toggle-sort") this.toggleStateSort(target);
+    else if (cmd === "collapse-all") {
+      for (const id of this.groupIds) this.collapsed.add(id);
+      saveStoredSet(COLLAPSED_KEY, this.collapsed);
+    } else if (cmd === "expand-all") {
+      this.collapsed.clear();
+      saveStoredSet(COLLAPSED_KEY, this.collapsed);
+    } else if (cmd === "sort-created") {
+      this.stateSort.clear();
+      saveStoredSet(STATE_SORT_KEY, this.stateSort);
+    } else if (cmd === "sort-state") {
+      for (const id of this.groupIds) this.stateSort.add(id);
+      saveStoredSet(STATE_SORT_KEY, this.stateSort);
+    } else {
+      return;
+    }
+    cx.notify();
   }
 
   render() {
@@ -234,17 +345,86 @@ export default class Scope extends View {
       cmpDesc(rs.workspace.get(x.space), rs.workspace.get(y.space)) ||
       cmpDesc(rl.tab.get(x.address), rl.tab.get(y.address)) ||
       cmpDesc(rl.pane.get(x.address), rl.pane.get(y.address)));
-    // agent.next/prev/select follow the panel, not the model order.
-    setAgentOrder(ordered.map((a) => a.address));
-
-    const status = (a) => {
-      if (a.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).mx(1).flex_none().text_color(t.working).spin(900);
-      if (a.status === "blocked") return div().flex_none().px(5).h(16).rounded(5).bg(t.blocked + "26").text_size(10).font_semibold().text_color(t.blocked).flex().items_center().child("Needs you");
-      if (a.status === "idle") return div().size(7).mx(3).flex_none().rounded(4).border(1.5).border_color(t.idle ?? t.dim);
-      return div().size(7).mx(3).flex_none().rounded(4).bg(t[a.status] ?? t.dim);
-    };
 
     const groups = groupsOf(ordered, rs.fam);
+    this.groupIds = groups.map((g) => g.id);
+    this.activeGroupId = groups.find((g) => g.members.some((a) => a.focused))?.id ?? null;
+    const rowName = (a, g) => {
+      const label = labelOf(a.space) || a.space_name;
+      // The short name: a tagged row shows its bare worker, the way the Go
+      // plugin publishes run_worker; an untagged row shows its telling title.
+      return g.tag ? (workerName(label) || clean(a.title) || a.program?.name || a.address)
+        : (clean(a.tab_name) || clean(a.title) || a.program?.name || a.address);
+    };
+    const displayMembers = (g) => {
+      if (!this.stateSort.has(g.id)) return g.members;
+      return [...g.members].sort((x, y) => {
+        const rx = STATE_SORT_RANK[x.status] ?? 4;
+        const ry = STATE_SORT_RANK[y.status] ?? 4;
+        if (rx !== ry) return rx - ry;
+        const nx = rowName(x, g).toLowerCase();
+        const ny = rowName(y, g).toLowerCase();
+        return nx === ny ? 0 : nx < ny ? -1 : 1;
+      });
+    };
+
+    // Keep all rows (including collapsed groups) in panel order so agent.next/prev/select
+    // never fall back to appending unlisted collapsed agents in raw model order.
+    const panelOrder = groups.flatMap((g) => displayMembers(g));
+    setAgentOrder(panelOrder.map((a) => a.address));
+
+    // Per-chief active/total counts for the header badge: active = live agents in
+    // that chief's group, total = unique runs per chief from the ledger join.
+    const ledgerTotals = new Map();
+    if (led && !led.missing) {
+      for (const rec of led.byLabel.values()) {
+        if (!rec?.chief) continue;
+        ledgerTotals.set(rec.chief, (ledgerTotals.get(rec.chief) ?? 0) + 1);
+      }
+    }
+    const activeByChief = new Map();
+    for (const g of groups) {
+      if (!g.tag) continue;
+      activeByChief.set(g.tag, (activeByChief.get(g.tag) ?? 0) + g.members.length);
+    }
+    const chiefCounts = [];
+    const seenChiefs = new Set();
+    for (const [chief, active] of activeByChief) {
+      seenChiefs.add(chief);
+      const total = Math.max(ledgerTotals.get(chief) ?? 0, active);
+      chiefCounts.push({ chief, short: shortChief(chief), active, total });
+    }
+    const ledgerOnly = [...ledgerTotals.entries()]
+      .filter(([chief]) => !seenChiefs.has(chief))
+      .sort((a, b) => b[1] - a[1]);
+    for (const [chief, total] of ledgerOnly) {
+      chiefCounts.push({ chief, short: shortChief(chief), active: 0, total });
+    }
+    const p = bunnyPalette(t);
+    // Block state is an icon, not a text badge (the engineer's ask, and the
+    // pattern mods/agents already follows with its `clock` sort chip): the
+    // full counts live in the tooltip; the clock's colour carries the state —
+    // caution while any chief still runs, ok when its workers are done, dim
+    // while the ledger is loading, off or missing.
+    const badgeFull = chiefCounts.map((c) => `${c.short} ${c.active}/${c.total}`).join(" · ");
+    const ledgerIn = led !== null && led.dir && !led.missing;
+    const clockTip = led === null
+      ? "ledger: loading"
+      : !led.dir
+        ? "ledger: off"
+        : led.missing
+          ? "ledger: no runs"
+          : badgeFull || "0 active";
+    const clockColor = ledgerIn && chiefCounts.length > 0
+      ? (chiefCounts.some((c) => c.active > 0) ? p.caution : p.ok)
+      : t.dim;
+    const status = (a) => {
+      if (a.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).mx(1).flex_none().text_color(p.caution).spin(900);
+      if (a.status === "blocked") return div().flex_none().px(5).h(16).rounded(5).bg(p.danger + "26").text_size(10).font_semibold().text_color(p.danger).flex().items_center().child("Needs you");
+      if (a.status === "idle") return div().size(7).mx(3).flex_none().rounded(4).border(1.5).border_color(p.ok);
+      return div().size(7).mx(3).flex_none().rounded(4).bg(a.status === "done" ? p.ok : (t[a.status] ?? p.title));
+    };
+
     const rows = [];
     for (const g of groups) {
       // One header per block: the tag names the chief, a plain space names
@@ -253,19 +433,43 @@ export default class Scope extends View {
       const head = g.tag || labelOf(g.members[0]?.space) || g.id;
       const top = g.members.some((a) => a.status === "blocked") ? "blocked"
         : g.members.some((a) => a.status === "working") ? "working" : null;
+      const headColor = top === "blocked" ? p.danger : top === "working" ? p.caution : p.identity;
+      const isCollapsed = this.collapsed.has(g.id);
+      const isStateSort = this.stateSort.has(g.id);
       rows.push(h_flex()
         .id(`sc-h-${g.id}`)
-        .px(12).pt(8).pb(2).h(26).flex_none().gap(6).items_center()
-        .text_size(11).font_medium().text_color(t[top] ?? t.dim)
-        .child(div().truncate().child(head))
-        .when(Boolean(top), (el) => el.child(div().size(6).flex_none().rounded(3).bg(t[top]))));
-      g.members.forEach((a, i) => {
+        .px(10).pt(6).pb(2).h(26).flex_none().gap(5).items_center().rounded(6)
+        .text_size(11).font_semibold().text_color(headColor)
+        .cursor_pointer().hover((el) => el.bg(t.hover))
+        .on_click((_e, cx) => {
+          this.toggleCollapsed(g.id);
+          cx.notify();
+        })
+        .child(svg(`mods/workspace-chrome/chevron-${isCollapsed ? "right" : "down"}.svg`).size(10).flex_none().text_color(headColor))
+        .child(div().flex_1().min_w(0).truncate().child(head))
+        .when(isCollapsed, (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child(String(g.members.length))))
+        .when(Boolean(top), (el) => el.child(div().size(6).flex_none().rounded(3).bg(headColor)))
+        .child(div()
+          .id(`sc-sort-${g.id}`)
+          .flex_none().px(5).h(16).rounded(4).flex().items_center()
+          .text_size(9.5).cursor_pointer()
+          .when(isStateSort, (el) => el.bg(p.accent2 + "26").text_color(p.accent2).font_semibold())
+          .when(!isStateSort, (el) => el.text_color(t.dim).hover((s) => s.bg(t.raised).text_color(p.title)))
+          .tooltip(isStateSort
+            ? "Order: state (working → blocked → idle → done; rows move). Click for stable created order"
+            : "Order: created (stable). Click to sort by state (rows move)")
+          .on_click((_e, cx) => {
+            cx.stop_propagation();
+            this.toggleStateSort(g.id);
+            cx.notify();
+          })
+          .child(isStateSort ? "state" : "sort")));
+
+      if (isCollapsed) continue;
+
+      displayMembers(g).forEach((a, i) => {
         const rec = recByAddress.get(a.address);
-        const label = labelOf(a.space) || a.space_name;
-        // The short name: a tagged row shows its bare worker, the way the Go
-        // plugin publishes run_worker; an untagged row shows its telling title.
-        const name = g.tag ? (workerName(label) || clean(a.title) || a.program?.name || a.address)
-          : (clean(a.tab_name) || clean(a.title) || a.program?.name || a.address);
+        const name = rowName(a, g);
         const machine = String(a.address).includes("/") ? a.address.split("/")[0] : (rec?.machine ?? null);
         rows.push(h_flex()
           .id(`sc-${a.address}`)
@@ -275,21 +479,23 @@ export default class Scope extends View {
           .hover((el) => el.bg(t.hover))
           .cursor_pointer()
           .on_click(() => run("pane.focus", { terminal: a.address }))
-          .child(div().flex_1().min_w(0).truncate().text_color(a.focused ? t.foreground : t.muted).child(name))
-          .when(Boolean(rec?.state), (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child(rec.state)))
-          .when(Boolean(rec?.runtime), (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child(rec.runtime)))
-          .when(Boolean(machine), (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child(machine)))
+          .child(div().flex_1().min_w(0).truncate().text_color(a.focused ? p.identity : p.title).when(a.focused, (el) => el.font_semibold()).child(name))
+          .when(Boolean(rec?.state), (el) => el.child(div().flex_none().text_size(10).font_semibold().text_color(scopeStateColor(rec.state, p)).child(rec.state)))
+          .when(Boolean(rec?.runtime), (el) => el.child(div().flex_none().text_size(10).text_color(p.accent2).child(rec.runtime)))
+          .when(Boolean(machine), (el) => el.child(div().flex_none().text_size(10).text_color(p.accent2).child(machine)))
           .child(status(a)));
       });
     }
 
     return v_flex()
-      .size_full().min_h(0).bg(t.chrome).text_size(13)
-      .child(h_flex().px(16).pt(12).pb(4).h(36).flex_none().items_center().gap(8)
-        .child(div().text_size(11.5).font_medium().text_color(t.dim).child("Scope"))
-        .child(div().flex_1())
-        .child(div().text_size(10).text_color(t.dim).child(
-          led === null ? "ledger: loading" : !led.dir ? "ledger: off" : led.missing ? "ledger: no runs" : `${led.byLabel.size} runs`)))
+      .size_full().min_h(0).bg(t.chrome).border_t(1).border_color(t.border).text_size(13)
+      .child(h_flex().px(16).pt(12).pb(4).h(36).flex_none().items_center().gap(6)
+        .child(svg("icons-bunny/bunny-chief.svg").size(14).flex_none().text_color(p.accent2))
+        .child(div().flex_none().text_size(11.5).font_semibold().text_color(p.accent2).child("Scope"))
+        .child(div().flex_1().min_w(4))
+        .child(div().id("sc-clock").flex_none().w(18).flex().items_center().justify_center()
+          .tooltip(clockTip)
+          .child(svg("mods/workspace-chrome/clock.svg").size(14).flex_none().text_color(clockColor))))
       .when(ordered.length === 0, (el) => el.child(
         div().px(12).text_size(12).text_color(t.dim).child("No agents yet. Workers appear here grouped under their chief tag, in the order their spaces were created.")))
       .child(v_flex().id("sc-list").flex_1().min_h(0).px(8).overflow_y_scrollbar().mode("always").children(rows));

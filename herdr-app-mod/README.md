@@ -71,11 +71,16 @@ herdr-app check <this folder>    # prints "check passed"
    `machine/term_x` addresses are matched on their `term_x` tail), falling
    back to `workspaceLabel == space_name`. A matched run adds the ledger
    chips: `state` (`running`, `awaiting-review`, …), `runtime` (`omp`), and
-   `machine` when the address carries none.
+   `machine` when the address carries none. The chief block state — active
+   and total runs per chief (`b1 0/42 · b2 0/2 +2`) — shows as a **clock
+   icon** at the right of the header strip, the way the Agents panel wears
+   its sort icons: colour carries the state (caution while any chief runs,
+   ok when they are idle, dim when the ledger says nothing), the full counts
+   live in the tooltip. No block text sits in the panel.
 3. **Degradation** — the ledger is enrichment only. If the folder is absent,
    unreadable, or a file is the old schema (no `workers[]`), the mod still
    groups and orders by the live labels; rows simply lose their chips and the
-   header strip says `ledger: no runs` / `ledger: off` instead of a run count.
+   header clock dims, its tooltip reading `ledger: no runs` / `ledger: off`.
    An agent with no ledger match is unaffected.
 
 ## View props
